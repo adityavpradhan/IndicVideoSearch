@@ -1,6 +1,6 @@
 import streamlit as st
 import os
-
+import sarvamai
 # Set page config
 st.set_page_config(page_title="Chat Application", layout="wide")
 
@@ -50,7 +50,11 @@ for message in st.session_state.messages:
 
 # Text input through chat input
 user_input = st.chat_input("Type a message...")
+
+# We can similarly get audio input from the user and then call the SarvamAI API
+# to convert speech from any language (they have automatic language identification) to text in English.
+
 if user_input:
     st.session_state.messages.append({"role": "user", "content": user_input})
-    
+    # Here you would typically call our LLM, SarvamAI APIs, RAG modules to get a response
     st.rerun()
