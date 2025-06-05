@@ -13,6 +13,15 @@ import google.generativeai as genai
 from datetime import datetime
 import base64
 import time
+import json
+import os
+import numpy as np
+from langchain_community.vectorstores import Chroma
+from langchain_community.embeddings.sentence_transformer import SentenceTransformerEmbeddings
+
+import chromadb
+from chromadb.config import Settings
+from sentence_transformers import SentenceTransformer
 
 class VideoSummarizer:
     def __init__(self):
@@ -199,7 +208,7 @@ class VideoSummarizer:
     def save_summary_json(self, video_summary, output_path=None):
         """Save the video summary to JSON file"""
         # Ensure output folder exists
-        output_folder = "output"
+        output_folder = "IndicVideoSearch/output"
         os.makedirs(output_folder, exist_ok=True)
         
         if output_path is None:
@@ -433,6 +442,9 @@ class VideoSummarizer:
             # Save to file
             output_file = self.save_summary_json(video_summary, output_path)
             
+            # Vectorize and persist in ChromaDB
+            self.vectorize_summary_json(output_file)
+            
             # Clean up
             video.close()
             for chunk, _ in chunks:
@@ -514,6 +526,65 @@ class VideoSummarizer:
             print(f"❌ Invalid JSON file: {json_file}")
         except Exception as e:
             print(f"❌ Error reading file: {e}")
+
+    def vectorize_summary_json(self, summary_json_path, persist_directory="chroma_db"):
+        """Load summary JSON, vectorize only the summary fields, and store in Chroma DB with metadata."""
+        print(f"Vectorizing summary from: {summary_json_path}")
+        
+        # Load summary data from JSON
+        with open(summary_json_path, 'r', encoding='utf-8') as f:
+            summary_data = json.load(f)
+            
+        # Initialize Chroma client
+        client = chromadb.Client(Settings(
+            persist_directory=persist_directory,
+            is_persistent=True
+        ))
+        
+        # Delete existing collection if it exists
+        try:
+            client.delete_collection("video_summaries")
+        except:
+            pass
+            
+        # Create new collection
+        collection = client.create_collection(
+            name="video_summaries",
+            metadata={"description": "Video chunk summaries with temporal information"}
+        )
+        
+        # Initialize the embedding model
+        embedder = SentenceTransformer("all-MiniLM-L6-v2")
+        
+        # Add documents to collection
+        documents = []
+        metadatas = []
+        ids = []
+        
+        for chunk in summary_data["chunks"]:
+            summary_text = chunk["summary"]
+            metadata = {
+                "chunk_number": str(chunk["chunk_number"]),  # Convert to strings for ChromaDB
+                "start_time": str(chunk["start_time"]),
+                "end_time": str(chunk["end_time"]),
+                "video_name": summary_data["video_name"],
+                "video_path": summary_data["video_path"]
+            }
+            doc_id = f"{summary_data['video_name']}_chunk_{chunk['chunk_number']}"
+            
+            documents.append(summary_text)
+            metadatas.append(metadata)
+            ids.append(doc_id)
+        
+        # Add all documents to collection
+        collection.add(
+            documents=documents,
+            metadatas=metadatas,
+            ids=ids
+        )
+        
+        print(f"✅ All summaries vectorized and stored in ChromaDB at {persist_directory}!")
+        return collection
 
 def interactive_mode():
     """Interactive mode for processing videos"""
