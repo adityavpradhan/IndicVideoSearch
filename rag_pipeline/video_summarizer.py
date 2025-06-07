@@ -8,7 +8,7 @@ import os
 import json
 import cv2
 import numpy as np
-from moviepy.editor import VideoFileClip
+from moviepy import VideoFileClip
 import google.generativeai as genai
 from datetime import datetime
 import base64
@@ -64,7 +64,7 @@ class VideoSummarizer:
             start_time = i * self.chunk_duration
             end_time = min((i + 1) * self.chunk_duration, duration)
             
-            chunk = video.subclip(start_time, end_time)
+            chunk = video.subclipped(start_time, end_time).with_volume_scaled(0.8)
             
             chunk_info = {
                 'chunk_number': i + 1,
@@ -91,7 +91,32 @@ class VideoSummarizer:
                 frame = chunk.get_frame(t)
                 frames.append(frame)
         
-        return frames, None
+        # Extract audio
+        audio_data = None
+        temp_audio_path = None
+        
+        if chunk.audio is not None:
+            try:
+                # Create temporary directory for audio files
+                os.makedirs("temp_audio", exist_ok=True)
+                
+                # Generate unique filename for this chunk
+                timestamp = int(time.time() * 1000)
+                temp_audio_path = f"temp_audio/chunk_audio_{timestamp}.wav"
+                
+                # Export audio to temporary file
+                chunk.audio.write_audiofile(temp_audio_path, logger=None)
+                
+                # Read audio file as bytes for Gemini API
+                with open(temp_audio_path, 'rb') as audio_file:
+                    audio_data = audio_file.read()
+                    
+            except Exception as e:
+                print(f"Warning: Could not extract audio - {str(e)}")
+                audio_data = None
+                temp_audio_path = None
+        
+        return frames, audio_data, temp_audio_path
     
     def frames_to_base64(self, frames):
         """Convert frames to base64 for API"""
@@ -109,38 +134,75 @@ class VideoSummarizer:
         print(f"Summarizing chunk {chunk_info['chunk_number']}...")
         
         try:
-            frames, _ = self.extract_frames_and_audio(chunk)
+            frames, audio_data, temp_audio_path = self.extract_frames_and_audio(chunk)
             
             prompt = f"""
-            Analyze this {self.chunk_duration}-second video segment and provide a detailed summary in English.
+            Analyze this {self.chunk_duration}-second video segment and provide a comprehensive summary in English.
             
             Time range: {chunk_info['timestamp']}
             Chunk duration: {chunk_info['duration']:.2f} seconds
             
-            Please provide:
-            1. Visual description: What is happening in the video? Include objects, people, actions, scenes, text if any
-            2. Audio analysis: Describe any speech, music, sound effects, or ambient sounds
-            3. Key events: Main activities or important moments in this segment
-            4. Context: Overall theme or topic of this segment
+            IMPORTANT: Your response must be EXACTLY {self.max_summary_chars} characters or less. Do not exceed this limit.
             
-            Keep the summary detailed but concise (max {self.max_summary_chars} characters).
-            Focus on the most important visual and audio elements.
+            Please provide:
+            1. Visual description: What is happening in the video? Include objects, people, actions, scenes, text
+            2. Audio analysis: Describe speech, music, sound effects, ambient sounds (provide general description, not word-for-word transcription)
+            3. Key events: Main activities or important moments
+            4. Context: Overall theme or topic
+            5. Audio-Visual correlation: How audio and visual elements relate
+            
+            Structure your response to fit within {self.max_summary_chars} characters. Be concise but comprehensive.
+            Focus on describing content rather than listing specific phrases or keywords.
+            End your response naturally - do not use ellipses or indicate truncation.
             """
             
+            # Prepare content for Gemini API
             base64_frames = self.frames_to_base64(frames)
             content = [prompt]
             
+            # Add video frames
             for frame_b64 in base64_frames:
                 content.append({
                     "mime_type": "image/jpeg",
                     "data": frame_b64
                 })
             
-            response = self.model.generate_content(content)
-            summary = response.text
+            if audio_data:
+                audio_b64 = base64.b64encode(audio_data).decode('utf-8')
+                content.append({
+                    "mime_type": "audio/wav",
+                    "data": audio_b64
+                })
+            else:
+                print(f"No audio available for this chunk")
             
+            # Configure generation with stricter parameters
+            generation_config = {
+                "max_output_tokens": int(self.max_summary_chars * 0.8),  # Conservative token limit
+                "temperature": 0.3,  # Lower temperature for more focused output
+            }
+            
+            response = self.model.generate_content(content, generation_config=generation_config)
+            summary = response.text.strip()
+            
+            # Only truncate if still too long (as backup)
             if len(summary) > self.max_summary_chars:
-                summary = summary[:self.max_summary_chars-3] + "..."
+                # Find last complete sentence within limit
+                truncate_pos = summary.rfind('.', 0, self.max_summary_chars - 10)
+                if truncate_pos > self.max_summary_chars * 0.7:  # If we found a good sentence ending
+                    summary = summary[:truncate_pos + 1]
+                else:
+                    # Fallback to character limit with proper ending
+                    summary = summary[:self.max_summary_chars - 3] + "..."
+            
+            print(f"Summary generated ({len(summary)} characters)")
+            
+            # Clean up temporary audio file
+            if temp_audio_path and os.path.exists(temp_audio_path):
+                try:
+                    os.remove(temp_audio_path)
+                except Exception as e:
+                    print(f"Warning: Could not delete temp audio file {temp_audio_path}: {e}")
             
             return summary
             
@@ -148,6 +210,18 @@ class VideoSummarizer:
             print(f"Error summarizing chunk {chunk_info['chunk_number']}: {str(e)}")
             return f"Error processing chunk: {str(e)}"
     
+    def cleanup_temp_files(self):
+        """Clean up any remaining temporary audio files"""
+        temp_dir = "temp_audio"
+        if os.path.exists(temp_dir):
+            try:
+                for file in os.listdir(temp_dir):
+                    if file.startswith("chunk_audio_"):
+                        os.remove(os.path.join(temp_dir, file))
+                os.rmdir(temp_dir)
+            except Exception as e:
+                print(f"Warning: Could not clean up temp directory: {e}")
+                
     def create_video_summary_json(self, video_info, chunk_summaries):
         """Function 4: Create JSON with video summary data"""
         print("Creating video summary JSON...")
@@ -374,7 +448,7 @@ class VideoSummarizer:
                         time.sleep(4)  # 4 seconds for next 10 chunks
                     else:
                         time.sleep(6)  # 6 seconds for remaining chunks
-                        
+                
                 except Exception as e:
                     if "429" in str(e):
                         print(f"⏸️  Rate limit hit on chunk {chunk_info['chunk_number']}. Waiting 60 seconds...")
@@ -399,6 +473,8 @@ class VideoSummarizer:
             video.close()
             for chunk, _ in chunks:
                 chunk.close()
+            # Clean up temporary audio files
+            self.cleanup_temp_files()
             
             print("=" * 50)
             print("VIDEO SUMMARIZATION COMPLETED!")
@@ -408,6 +484,7 @@ class VideoSummarizer:
             return video_summary, output_file
             
         except Exception as e:
+            self.cleanup_temp_files()
             print(f"Error processing video: {str(e)}")
             raise
     
