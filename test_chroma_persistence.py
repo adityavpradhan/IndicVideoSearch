@@ -43,6 +43,7 @@ def test_persistence():
             for i, doc in enumerate(results):
                 print(f"\nMatch {i+1}:")
                 print(f"Start time: {doc.metadata.get('start_time', 'N/A')} seconds")
+                print(f"End time: {doc.metadata.get('end_time', 'N/A')} seconds")
                 print(f"Content: {doc.page_content[:300]}...")
         except Exception as e:
             print(f"Error during search: {e}")
