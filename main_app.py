@@ -30,7 +30,7 @@ class ChatApp:
         self.client_manager.initialize_llm(self.config.llm_model, self.config.llm_temperature)
         
         # Initialize components
-        self.query_transformer = QueryTransformer(self.client_manager.llm)
+        self.query_transformer = QueryTransformer(self.client_manager.llm) # This is the module for query transformation
         self.video_handler = VideoUploadHandler(self.config)
         self.audio_handler = AudioHandler(self.client_manager.sarvam_client)
         # Pass system prompt to message handler

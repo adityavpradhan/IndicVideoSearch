@@ -1,6 +1,6 @@
 import os
 import streamlit as st
-from sarvam_client import SarvamClient
+from llm_clients.sarvam_client import SarvamClient
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 class ClientManager:
