@@ -61,7 +61,7 @@ markdown-it-py==3.0.0
 MarkupSafe==3.0.2
 mdurl==0.1.2
 mmh3==5.1.0
-moviepy==2.2.1
+moviepy==1.0.3
 mpmath==1.3.0
 narwhals==1.41.0
 numpy==2.2.6
