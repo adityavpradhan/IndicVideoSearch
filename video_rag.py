@@ -17,7 +17,6 @@ import json
 import os
 import numpy as np
 from langchain_community.vectorstores import Chroma
-from langchain_community.embeddings.sentence_transformer import SentenceTransformerEmbeddings
 
 import chromadb
 from chromadb.config import Settings
@@ -31,7 +30,7 @@ class VideoSummarizer:
         self.model = genai.GenerativeModel('gemini-1.5-pro')
         
         # Configuration
-        self.chunk_duration = 10  # 10 seconds per chunk
+        self.chunk_duration = 30  # 10 seconds per chunk
         self.max_summary_chars = 1500
         
     def ingest_video(self, video_path):
@@ -208,7 +207,7 @@ class VideoSummarizer:
     def save_summary_json(self, video_summary, output_path=None):
         """Save the video summary to JSON file"""
         # Ensure output folder exists
-        output_folder = "IndicVideoSearch/output"
+        output_folder = "output"
         os.makedirs(output_folder, exist_ok=True)
         
         if output_path is None:
