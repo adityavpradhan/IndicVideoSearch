@@ -1,37 +1,176 @@
-from sarvamai import SarvamAI
+# sarvam_client.py
 import os
+from sarvamai import SarvamAI
+# We would need a function to save the audio data, e.g.:
+from pydub import AudioSegment
+import io
+import requests
 
 class SarvamClient:
     def __init__(self):
-        self.client = SarvamAI(
-            api_subscription_key=os.getenv("SARVAMAI_API_KEY")
-            )
+        """
+        Initializes the SarvamAI client.
+        Requires the SARVAMAI_API_KEY environment variable to be set.
+        """
+        # Sarvam API Endpoint
+        # API endpoint for speech-to-text translation
+        self.api_url = "https://api.sarvam.ai/speech-to-text-translate"
+        # Headers containing the API subscription key
+        self.headers = {
+            "api-subscription-key": os.getenv("SARVAMAI_API_KEY")
+        }
+        # Data payload for the translation request
+        self.data = {
+            "model": "saaras:v2",  # Specify the model to be used
+            "with_diarization": False  # Set to True for speaker diarization
+        }
+
+    # Split audio data into chunks and save to a file
+    def split_audio(self, audio_path, chunk_duration_ms):
+        """
+        Splits an audio file into smaller chunks of specified duration.
+        Args:
+            audio_path (str): Path to the audio file to be split.
+            chunk_duration_ms (int): Duration of each chunk in milliseconds.
+        Returns:
+            list: A list of AudioSegment objects representing the audio chunks.
+        """
+        audio = AudioSegment.from_file(audio_path)  # Load the audio file
+        chunks = []
+        if len(audio) > chunk_duration_ms:
+            # Split the audio into chunks of the specified duration
+            for i in range(0, len(audio), chunk_duration_ms):
+                chunks.append(audio[i:i + chunk_duration_ms])
+        else:
+            # If the audio is shorter than the chunk duration, use the entire audio
+            chunks.append(audio)
+        return chunks
+
+    # Translating the audio chunks to text
+    def translate_audio(self, audio_file_path, chunk_duration_ms=5*60*1000):
+        """
+        Translates audio into text with optional diarization and timestamps.
+        Args:
+            audio_file_path (str): Path to the audio file.
+            chunk_duration_ms (int): Duration of each audio chunk in milliseconds.
+        Returns:
+            dict: Collated response containing the transcript and word-level timestamps.
+        """
+        # Split the audio into chunks
+        chunks = self.split_audio(audio_file_path, chunk_duration_ms)
+        responses = []
+        # print the number of chunks
+        print(f"Number of chunks: {len(chunks)}")
+        # Process each chunk
+        for idx, chunk in enumerate(chunks):
+            # print the size of the chunk and index
+            print(f"Processing chunk {idx} of size {len(chunk)} ms")
+            # Export the chunk to a BytesIO object (in-memory binary stream)
+            chunk_buffer = io.BytesIO()
+            chunk.export(chunk_buffer, format="wav")
+            chunk_buffer.seek(0)  # Reset the pointer to the start of the stream
+            # Prepare the file for the API request
+            files = {'file': ('audiofile.wav', chunk_buffer, 'audio/wav')}
+            try:
+                # Make the POST request to the API
+                response = requests.post(self.api_url, headers=self.headers, files=files, data=self.data)
+                if response.status_code == 200 or response.status_code == 201:
+                    print(f"Chunk {idx} POST Request Successful!")
+                    response_data = response.json()
+                    transcript = response_data.get("transcript", "")
+                    responses.append({"transcript": transcript})
+                else:
+                    # Handle failed requests
+                    print(f"Chunk {idx} POST Request failed with status code: {response.status_code}")
+                    print("Response:", response.text)
+            except Exception as e:
+                # Handle any exceptions during the request
+                print(f"Error processing chunk {idx}: {e}")
+            finally:
+                # Ensure the buffer is closed after processing
+                chunk_buffer.close()
+        # Collate the transcriptions from all chunks
+        collated_transcript = " ".join([resp["transcript"] for resp in responses])
+        collated_response = {
+            "transcript": collated_transcript,
+            "language": response_data.get("language_code")
+        }
+        return collated_response
+
 
     def speech_to_text(self, audio_file_path):
-        '''
-        Function needs to be expanded as per need
-        '''
-        # This will work for small audio files.
-        response = self.client.speech_to_text.translate(
-            file=open(audio_file_path, "rb"),
-            model="saaras:v2"
-            )
+        """
+        Transcribes speech from an audio file to text using SarvamAI.
+        This function expects the path to an audio file.
+        The SarvamAI API will attempt to auto-detect the source language and translate to English.
 
-        # for larger files, we need to implement chunking
-        # There is a reference here: https://docs.sarvam.ai/api-reference-docs/cookbook/starter-notebooks/stt-translate-api-tutorial#4-speech-to-text-translation-api
-        return response
+        Args:
+            audio_file_path (str): The path to the audio file.
 
-    def text_to_speech(self, text, voice):
-        '''
-        This function also needs to be expanded as per need
-        https://docs.sarvam.ai/api-reference-docs/cookbook/starter-notebooks/tts-api-tutorial
-        '''
-        response = client.text_to_speech.convert(
-            text="Your Text",
-            target_language_code="hi-IN",
-            speaker="anushka",
-            enable_preprocessing=True
-        )
-        # play(response)
-        save(response, "output.wav")
-        return response
+        Returns:
+            str: The transcribed text, or an error message if transcription fails.
+        """
+        try:
+            # Open the audio file in binary read mode
+            with open(audio_file_path, "rb") as audio_file:
+                # Call the SarvamAI speech-to-text API
+                # Translate the audio
+                translation = self.translate_audio(audio_file_path)
+                # Display the translation results
+                print("Translation Results:")
+                print(translation)
+            if isinstance(translation, dict) and 'transcript' in translation:
+                print(f"Transcription: {translation['transcript']}")
+                return translation['transcript']
+            else:
+                # If the structure is unknown, return the whole response for inspection
+                print(f"Unexpected STT response format: {translation}")
+                return "Transcription data not found in expected format."
+
+        except FileNotFoundError:
+            print(f"Error: Audio file not found at {audio_file_path}")
+            return "Error: Audio file not found."
+        except Exception as e:
+            # Catch any other exceptions during the API call
+            print(f"Error during SarvamAI speech-to-text API call: {e}")
+            return f"Error during transcription: {e}"
+
+    # def text_to_speech(self, text, voice="anushka", target_language_code="hi-IN"):
+    #     """
+    #     Converts text to speech using SarvamAI.
+    #     This function is a placeholder and needs to be expanded based on how
+    #     you want to handle the output (e.g., playing directly or saving to a file).
+    #     https://docs.sarvam.ai/api-reference-docs/cookbook/starter-notebooks/tts-api-tutorial
+
+    #     Args:
+    #         text (str): The text to convert to speech.
+    #         voice (str): The voice to use for speech synthesis.
+    #         target_language_code (str): The target language code (e.g., "hi-IN" for Hindi).
+
+    #     Returns:
+    #         The response from the SarvamAI TTS API, or None if an error occurs.
+    #     """
+    #     try:
+    #         response = self.client.text_to_speech.convert( # Corrected from 'client' to 'self.client'
+    #             text=text,
+    #             target_language_code=target_language_code,
+    #             speaker=voice,
+    #             enable_preprocessing=True
+    #         )
+
+    #         # The 'play(response)' and 'save(response, "output.wav")' lines
+    #         # depend on external functions you need to implement or import.
+    #         # For example, to save the audio:
+    #         # if hasattr(response, 'audio_content'): # Or whatever attribute holds the audio data
+    #         #     with open("output.wav", "wb") as f:
+    #         #         f.write(response.audio_content)
+    #         #     print("TTS output saved to output.wav")
+    #         # else:
+    #         #     print("Could not save TTS output: audio_content not found in response.")
+
+    #         print(f"TTS API call successful. Response: {response}") # Log or inspect the response
+    #         return response
+    #     except Exception as e:
+    #         print(f"Error during SarvamAI text-to-speech API call: {e}")
+    #         return None  # Return None on error
+        

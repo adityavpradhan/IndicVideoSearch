@@ -8,8 +8,15 @@
  source searchenv/bin/activate
  ```
 
+- Add all relevant API keys
+```bash
+export SARVAMAI_API_KEY="<YOUR-KEY>"
+export GEMINI_API_KEY="<YOUR-KEY>"
+export GOOGLE_API_KEY="<SAME KEY>" #Code is referencing it in 2 different ways. Will fix
+```
  - Install libraries
  ```bash
+ sudo apt install ffmpeg
  pip3 install -r requirements.txt
  ```
 
