@@ -8,11 +8,13 @@ import os
 import json
 import cv2
 import numpy as np
-from moviepy import VideoFileClip
 import google.generativeai as genai
 from datetime import datetime
 import base64
 import time
+import warnings
+import subprocess
+warnings.filterwarnings("ignore")
 
 class VideoSummarizer:
     def __init__(self):
@@ -33,26 +35,32 @@ class VideoSummarizer:
             raise FileNotFoundError(f"Video file not found: {video_path}")
         
         try:
-            video = VideoFileClip(video_path)
+            
+            video = cv2.VideoCapture(video_path)
+            duration = video.get(cv2.CAP_PROP_FRAME_COUNT) / video.get(cv2.CAP_PROP_FPS)
+            fps = video.get(cv2.CAP_PROP_FPS)
+            size = [int(video.get(cv2.CAP_PROP_FRAME_WIDTH)), int(video.get(cv2.CAP_PROP_FRAME_HEIGHT))]
+            frame_count = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
             video_info = {
                 'path': video_path,
-                'duration': video.duration,
-                'fps': video.fps,
-                'size': video.size,
+                'duration': duration,
+                'frame_count': frame_count,
+                'fps': fps,
+                'size': size,
                 'filename': os.path.basename(video_path)
             }
             
             print(f"Video loaded successfully!")
-            print(f"Duration: {video.duration:.2f} seconds")
-            print(f"FPS: {video.fps}")
-            print(f"Size: {video.size}")
+            print(f"Duration: {duration:.2f} seconds")
+            print(f"FPS: {fps}")
+            print(f"Size: {size}")
             
             return video, video_info
             
         except Exception as e:
             raise Exception(f"Error loading video: {str(e)}")
     
-    def segment_video(self, video, video_info):
+    def segment_video(self, video_info):
         """Function 2: Segment video into chunks"""
         print(f"Segmenting video into {self.chunk_duration}-second chunks...")
         
@@ -63,9 +71,6 @@ class VideoSummarizer:
         for i in range(chunk_count):
             start_time = i * self.chunk_duration
             end_time = min((i + 1) * self.chunk_duration, duration)
-            
-            chunk = video.subclipped(start_time, end_time).with_volume_scaled(0.8)
-            
             chunk_info = {
                 'chunk_number': i + 1,
                 'start_time': start_time,
@@ -74,47 +79,63 @@ class VideoSummarizer:
                 'timestamp': f"{int(start_time//60):02d}:{int(start_time%60):02d} - {int(end_time//60):02d}:{int(end_time%60):02d}"
             }
             
-            chunks.append((chunk, chunk_info))
+            chunks.append(chunk_info)
             print(f"Chunk {i+1}: {chunk_info['timestamp']}")
         
         print(f"Created {len(chunks)} chunks")
         return chunks
     
-    def extract_frames_and_audio(self, chunk):
-        """Extract key frames from a video chunk"""
-        duration = chunk.duration
-        frame_times = [0, duration/2, duration-0.1] if duration > 0.1 else [0]
+    def extract_frames_and_audio(self, video, chunk_info, video_path):
+        """Extract key frames and audio from a video chunk"""
+        start_time = chunk_info['start_time']
+        end_time = chunk_info['end_time']
+        fps = video.get(cv2.CAP_PROP_FPS)
+        
+        duration = end_time - start_time
+        if duration > 0.1:
+            frame_times = [start_time, start_time + duration/2, end_time - 0.1]
+        else:
+            frame_times = [start_time]
         
         frames = []
-        for t in frame_times:
-            if t < duration:
-                frame = chunk.get_frame(t)
+        for frame_time in frame_times:
+            frame_number = int(frame_time * fps)
+            video.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
+            ret, frame = video.read()
+            if ret:
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 frames.append(frame)
         
-        # Extract audio
+        # Extract audio using FFmpeg
         audio_data = None
         temp_audio_path = None
         
-        if chunk.audio is not None:
-            try:
-                # Create temporary directory for audio files
-                os.makedirs("temp_audio", exist_ok=True)
-                
-                # Generate unique filename for this chunk
-                timestamp = int(time.time() * 1000)
-                temp_audio_path = f"temp_audio/chunk_audio_{timestamp}.wav"
-                
-                # Export audio to temporary file
-                chunk.audio.write_audiofile(temp_audio_path, logger=None)
-                
-                # Read audio file as bytes for Gemini API
+        try:
+            os.makedirs("temp_audio", exist_ok=True)
+            timestamp = int(time.time() * 1000)
+            temp_audio_path = f"temp_audio/chunk_audio_{timestamp}.wav"
+            
+            cmd = [
+                'ffmpeg',
+                '-i', video_path,  # Use video_path, not video object
+                '-ss', str(chunk_info['start_time']),
+                '-t', str(chunk_info['duration']),
+                '-vn', '-acodec', 'pcm_s16le', '-ar', '22050', '-ac', '1', '-y',
+                temp_audio_path
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            
+            if result.returncode == 0 and os.path.exists(temp_audio_path):
                 with open(temp_audio_path, 'rb') as audio_file:
                     audio_data = audio_file.read()
-                    
-            except Exception as e:
-                print(f"Warning: Could not extract audio - {str(e)}")
-                audio_data = None
-                temp_audio_path = None
+            else:
+                print(f"Warning: Could not extract audio for chunk {chunk_info['chunk_number']}")
+                
+        except Exception as e:
+            print(f"Warning: Could not extract audio - {str(e)}")
+            audio_data = None
+            temp_audio_path = None
         
         return frames, audio_data, temp_audio_path
     
@@ -129,13 +150,12 @@ class VideoSummarizer:
         
         return base64_frames
     
-    def summarize_chunk(self, chunk, chunk_info):
+    def summarize_chunk(self, video, chunk_info, video_path):
         """Function 3: Summarize video chunk using Gemini"""
         print(f"Summarizing chunk {chunk_info['chunk_number']}...")
         
         try:
-            frames, audio_data, temp_audio_path = self.extract_frames_and_audio(chunk)
-            
+            frames, audio_data, temp_audio_path = self.extract_frames_and_audio(video, chunk_info, video_path)
             prompt = f"""
             Analyze this {self.chunk_duration}-second video segment and provide a comprehensive summary in English.
             
@@ -159,14 +179,12 @@ class VideoSummarizer:
             # Prepare content for Gemini API
             base64_frames = self.frames_to_base64(frames)
             content = [prompt]
-            
-            # Add video frames
             for frame_b64 in base64_frames:
                 content.append({
                     "mime_type": "image/jpeg",
                     "data": frame_b64
                 })
-            
+
             if audio_data:
                 audio_b64 = base64.b64encode(audio_data).decode('utf-8')
                 content.append({
@@ -296,7 +314,7 @@ class VideoSummarizer:
 
     def resume_failed_processing(self, video_path, existing_summary_path):
         """Resume processing from where it failed due to rate limits"""
-        print("🔄 RESUMING FAILED PROCESSING")
+        print(" RESUMING FAILED PROCESSING")
         print("=" * 50)
         
         try:
@@ -311,26 +329,26 @@ class VideoSummarizer:
                     failed_chunks.append(chunk['chunk_number'])
             
             if not failed_chunks:
-                print("✅ No failed chunks found. Summary appears complete!")
+                print("No failed chunks found. Summary appears complete!")
                 return existing_summary, existing_summary_path
             
-            print(f"🔍 Found {len(failed_chunks)} failed chunks: {failed_chunks}")
-            print("⏳ Re-processing failed chunks...")
+            print(f"Found {len(failed_chunks)} failed chunks: {failed_chunks}")
+            print("Re-processing failed chunks...")
             
             # Re-process the video
             video, video_info = self.ingest_video(video_path)
-            chunks = self.segment_video(video, video_info)
+            chunks = self.segment_video(video_info)
             
             # Only re-process failed chunks
             for chunk, chunk_info in chunks:
                 if chunk_info['chunk_number'] in failed_chunks:
-                    print(f"🔄 Re-processing chunk {chunk_info['chunk_number']}...")
+                    print(f"Re-processing chunk {chunk_info['chunk_number']}...")
                     
                     # Add longer delay for rate limit recovery
                     time.sleep(3)
                     
                     try:
-                        summary = self.summarize_chunk(chunk, chunk_info)
+                        summary = self.summarize_chunk(video, chunk_info, video_path)
                         
                         # Update the existing summary
                         for i, existing_chunk in enumerate(existing_summary['chunks']):
@@ -339,23 +357,23 @@ class VideoSummarizer:
                                 existing_summary['chunks'][i]['summary_length'] = len(summary)
                                 break
                         
-                        print(f"✅ Successfully re-processed chunk {chunk_info['chunk_number']}")
+                        print(f"Successfully re-processed chunk {chunk_info['chunk_number']}")
                         
                     except Exception as e:
-                        print(f"❌ Still failing on chunk {chunk_info['chunk_number']}: {str(e)}")
+                        print(f"Still failing on chunk {chunk_info['chunk_number']}: {str(e)}")
                         if "429" in str(e):
-                            print("⏸️  Rate limit hit again. Waiting 60 seconds...")
+                            print("Rate limit hit again. Waiting 60 seconds...")
                             time.sleep(60)
                             try:
-                                summary = self.summarize_chunk(chunk, chunk_info)
+                                summary = self.summarize_chunk(chunk, chunk_info, video_path)
                                 for i, existing_chunk in enumerate(existing_summary['chunks']):
                                     if existing_chunk['chunk_number'] == chunk_info['chunk_number']:
                                         existing_summary['chunks'][i]['summary'] = summary
                                         existing_summary['chunks'][i]['summary_length'] = len(summary)
                                         break
-                                print(f"✅ Successfully re-processed chunk {chunk_info['chunk_number']} after retry")
+                                print(f"Successfully re-processed chunk {chunk_info['chunk_number']} after retry")
                             except Exception as retry_error:
-                                print(f"❌ Final failure on chunk {chunk_info['chunk_number']}: {str(retry_error)}")
+                                print(f"Final failure on chunk {chunk_info['chunk_number']}: {str(retry_error)}")
             
             # Update metadata
             existing_summary['processing_date'] = datetime.now().isoformat()
@@ -364,9 +382,7 @@ class VideoSummarizer:
             output_file = self.save_summary_json(existing_summary, existing_summary_path)
             
             # Clean up
-            video.close()
-            for chunk, _ in chunks:
-                chunk.close()
+            video.release()
             
             print("=" * 50)
             print("RESUME PROCESSING COMPLETED!")
@@ -396,49 +412,49 @@ class VideoSummarizer:
                         failed_chunks.append(chunk['chunk_number'])
                 
                 if failed_chunks:
-                    print("🔍 FOUND EXISTING SUMMARY WITH FAILED CHUNKS!")
-                    print(f"📄 Summary file: {existing_path}")
-                    print(f"❌ Failed chunks: {failed_chunks}")
-                    print(f"📅 Previously processed: {existing_summary.get('processing_date', 'Unknown')}")
+                    print("FOUND EXISTING SUMMARY WITH FAILED CHUNKS!")
+                    print(f"Summary file: {existing_path}")
+                    print(f"Failed chunks: {failed_chunks}")
+                    print(f"Previously processed: {existing_summary.get('processing_date', 'Unknown')}")
                     print()
                     
                     resume_choice = input("💡 Resume processing failed chunks? (y/n): ").lower().strip()
                     if resume_choice == 'y' or resume_choice == 'yes' or resume_choice == '':
                         return self.resume_failed_processing(video_path, existing_path)
                     else:
-                        print("🔄 Full re-processing selected...")
+                        print("Full re-processing selected...")
                 else:
                     print("🔍 FOUND EXISTING SUMMARY!")
-                    print(f"📄 Summary file: {existing_path}")
-                    print(f"📅 Previously processed: {existing_summary.get('processing_date', 'Unknown')}")
-                    print(f"⏱️  Video duration: {existing_summary.get('total_duration', 0):.1f} seconds")
-                    print(f"📦 Total chunks: {existing_summary.get('total_chunks', 0)}")
+                    print(f"Summary file: {existing_path}")
+                    print(f"Previously processed: {existing_summary.get('processing_date', 'Unknown')}")
+                    print(f"Video duration: {existing_summary.get('total_duration', 0):.1f} seconds")
+                    print(f"Total chunks: {existing_summary.get('total_chunks', 0)}")
                     print()
                     
                     user_choice = input("💡 Summary already exists. Use existing? (y/n): ").lower().strip()
                     
                     if user_choice == 'y' or user_choice == 'yes' or user_choice == '':
-                        print("✅ Using existing summary (no API calls needed)")
+                        print("Using existing summary (no API calls needed)")
                         print("=" * 50)
                         print("VIDEO SUMMARIZATION COMPLETED!")
                         print(f"Summary loaded from: {existing_path}")
                         print("=" * 50)
                         return existing_summary, existing_path
                     
-                    print("🔄 Re-processing video as requested...")
+                    print("Re-processing video as requested...")
         
         try:
             # Step 1: Ingest video
             video, video_info = self.ingest_video(video_path)
             
             # Step 2: Segment video
-            chunks = self.segment_video(video, video_info)
+            chunks = self.segment_video(video_info)
             
             # Step 3: Summarize each chunk with rate limiting
             chunk_summaries = []
-            for i, (chunk, chunk_info) in enumerate(chunks):
+            for i, chunk_info in enumerate(chunks):
                 try:
-                    summary = self.summarize_chunk(chunk, chunk_info)
+                    summary = self.summarize_chunk(video, chunk_info, video_path)
                     chunk_summaries.append((chunk_info, summary))
                     
                     # Progressive delay to avoid rate limits
@@ -454,7 +470,7 @@ class VideoSummarizer:
                         print(f"⏸️  Rate limit hit on chunk {chunk_info['chunk_number']}. Waiting 60 seconds...")
                         time.sleep(60)
                         try:
-                            summary = self.summarize_chunk(chunk, chunk_info)
+                            summary = self.summarize_chunk(video, chunk_info, video_path)
                             chunk_summaries.append((chunk_info, summary))
                         except Exception as retry_error:
                             error_summary = f"Error processing chunk: {str(retry_error)}"
@@ -470,10 +486,7 @@ class VideoSummarizer:
             output_file = self.save_summary_json(video_summary, output_path)
             
             # Clean up
-            video.close()
-            for chunk, _ in chunks:
-                chunk.close()
-            # Clean up temporary audio files
+            video.release()
             self.cleanup_temp_files()
             
             print("=" * 50)
@@ -494,7 +507,7 @@ class VideoSummarizer:
         if json_file is None:
             json_files = [f for f in os.listdir('.') if f.endswith('_summary.json')]
             if not json_files:
-                print("❌ No summary files found in current directory")
+                print("No summary files found in current directory")
                 return
             elif len(json_files) == 1:
                 json_file = json_files[0]
@@ -506,7 +519,7 @@ class VideoSummarizer:
                     choice = int(input("\nSelect file number: ")) - 1
                     json_file = json_files[choice]
                 except (ValueError, IndexError):
-                    print("❌ Invalid selection")
+                    print("Invalid selection")
                     return
         
         try:
@@ -518,12 +531,12 @@ class VideoSummarizer:
             print("=" * 60)
             
             # Video info
-            print(f"📹 Video: {summary['video_name']}")
-            print(f"⏱️  Duration: {summary['total_duration']:.1f} seconds ({summary['total_duration']//60:.0f}m {summary['total_duration']%60:.0f}s)")
-            print(f"📊 Resolution: {summary['size'][0]}x{summary['size'][1]}")
-            print(f"🎬 FPS: {summary['fps']}")
-            print(f"📦 Total Chunks: {summary['total_chunks']}")
-            print(f"📅 Processed: {summary['processing_date'][:19]}")
+            print(f"Video: {summary['video_name']}")
+            print(f"Duration: {summary['total_duration']:.1f} seconds ({summary['total_duration']//60:.0f}m {summary['total_duration']%60:.0f}s)")
+            print(f"Resolution: {summary['size'][0]}x{summary['size'][1]}")
+            print(f"FPS: {summary['fps']}")
+            print(f"Total Chunks: {summary['total_chunks']}")
+            print(f"Processed: {summary['processing_date'][:19]}")
             print()
             
             # Chunk summaries
@@ -531,7 +544,7 @@ class VideoSummarizer:
             print("-" * 60)
             
             for chunk in summary['chunks']:
-                print(f"\n🎯 Chunk {chunk['chunk_number']} ({chunk['timestamp']})")
+                print(f"\nChunk {chunk['chunk_number']} ({chunk['timestamp']})")
                 print(f"📝 Summary ({chunk['summary_length']} chars):")
                 
                 summary_text = chunk['summary'].replace('\n\n', '\n').strip()
@@ -544,8 +557,8 @@ class VideoSummarizer:
             print("\n" + "=" * 60)
             
         except FileNotFoundError:
-            print(f"❌ File not found: {json_file}")
+            print(f"File not found: {json_file}")
         except json.JSONDecodeError:
-            print(f"❌ Invalid JSON file: {json_file}")
+            print(f"Invalid JSON file: {json_file}")
         except Exception as e:
-            print(f"❌ Error reading file: {e}")
+            print(f"Error reading file: {e}")
