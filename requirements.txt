@@ -184,3 +184,4 @@ zstandard==0.23.0
 langchain-google-genai
 pydub
 streamlit-audiorecorder
+googletrans==4.0.2
