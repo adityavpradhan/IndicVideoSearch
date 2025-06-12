@@ -109,7 +109,17 @@ class ChromaDBHandler:
             print(f"Error adding documents: {e}")
             return False
     
-    def search(self, collection_name: str, query: str, n_results: int = 5):
+    def search(self, collection_name: str, query: str, n_results: int = 5, search_method: str = "similarity"):
+        """Search in collection using different methods"""
+        if search_method == "similarity":
+            return self.similarity_search(collection_name, query, n_results)
+        elif search_method == "mmr":
+            return self.max_marginal_relevance_search(collection_name, query, n_results)
+        else:
+            print(f"Unknown search method: {search_method}")
+            return None
+    
+    def similarity_search(self, collection_name: str, query: str, n_results: int = 5):
         """Search in collection"""
         try:
             collection = self.get_collection(collection_name)
@@ -181,3 +191,35 @@ class ChromaDBHandler:
         except Exception as e:
             print(f"Error listing collections: {e}")
             return []
+        
+    def max_marginal_relevance_search(self, collection_name: str, query: str, n_results: int = 5, diversity: float = 0.3):
+        """Perform MMR search in collection"""
+        try:
+            collection = self.get_collection(collection_name)
+            if not collection:
+                return None
+            
+            results = collection.max_marginal_relevance_search(
+                query=query,
+                k=n_results,
+                fetch_k=2*n_results,  # Fetch more candidates than needed
+                lambda_mult=diversity  # Diversity factor (0-1)
+            )
+            # Format results to match original format
+            formatted_results = {
+                "ids": [],
+                "documents": [],
+                "metadatas": [],
+                "distances": []
+            }
+            
+            for doc in results:
+                formatted_results["documents"].append(doc.page_content)
+                formatted_results["metadatas"].append(doc.metadata)
+                formatted_results["ids"].append(doc.metadata.get("id", ""))
+                formatted_results["distances"].append(None)
+                
+            return formatted_results
+        except Exception as e:
+            print(f"Error performing MMR search: {e}")
+            return None
