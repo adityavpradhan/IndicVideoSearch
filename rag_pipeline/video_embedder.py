@@ -18,7 +18,7 @@ class VideoEmbedder:
         self.embedder = SentenceTransformer(model_name)
         
         # Initialize database handler (easily swappable)
-        self.db_handler = ChromaDBHandler(persist_directory)
+        self.db_handler = ChromaDBHandler(self.embedder, self.persist_directory)
     
     def load_summary_json(self, json_path):
         """Load video summary from JSON file"""
@@ -57,6 +57,7 @@ class VideoEmbedder:
         
         # Get or create collection
         collection = self.db_handler.get_or_create_collection(collection_name)
+        print(f"Using collection: {collection}")
         if not collection:
             raise Exception("Failed to create/get collection")
         
