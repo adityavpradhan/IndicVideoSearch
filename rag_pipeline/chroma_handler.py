@@ -7,6 +7,8 @@ from typing import List, Dict, Optional
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
+import hashlib
+import traceback
 
 class SentenceTransformerEmbeddings(Embeddings):
     """Wrapper for sentence_transformers to use with LangChain"""
@@ -109,47 +111,6 @@ class ChromaDBHandler:
             print(f"Error adding documents: {e}")
             return False
     
-    def search(self, collection_name: str, query: str, n_results: int = 5, search_method: str = "similarity"):
-        """Search in collection using different methods"""
-        if search_method == "similarity":
-            return self.similarity_search(collection_name, query, n_results)
-        elif search_method == "mmr":
-            return self.max_marginal_relevance_search(collection_name, query, n_results)
-        else:
-            print(f"Unknown search method: {search_method}")
-            return None
-    
-    def similarity_search(self, collection_name: str, query: str, n_results: int = 5):
-        """Search in collection"""
-        try:
-            collection = self.get_collection(collection_name)
-            if not collection:
-                return None
-            
-            results = collection.similarity_search_with_score(
-                query=query,
-                k=n_results
-            )
-            
-            # Format results to match original format
-            formatted_results = {
-                "ids": [],
-                "documents": [],
-                "metadatas": [],
-                "distances": []
-            }
-            
-            for doc, score in results:
-                formatted_results["documents"].append(doc.page_content)
-                formatted_results["metadatas"].append(doc.metadata)
-                formatted_results["ids"].append(doc.metadata.get("id", ""))
-                formatted_results["distances"].append(score)
-                
-            return formatted_results
-        except Exception as e:
-            print(f"Error searching: {e}")
-            return None
-    
     def get_collection_info(self, collection_name: str):
         """Get collection information"""
         try:
@@ -192,6 +153,59 @@ class ChromaDBHandler:
             print(f"Error listing collections: {e}")
             return []
         
+    def search(self, collection_name: str, query: str, n_results: int = 5, search_method: str = "hybrid"):
+        """Search in collection using different methods"""
+        if search_method == "similarity":
+            final_results = self.similarity_search(collection_name, query, n_results)
+        elif search_method == "mmr":
+            final_results = self.max_marginal_relevance_search(collection_name, query, n_results)
+        elif search_method == "hybrid":
+            # Hybrid search can be implemented as a combination of similarity and MMR
+            # This is a simple approach. I have tried to combine results from other methods
+            # such as MMR+Keyword or Similarity+Keyword and Similarity+MMR+Keyword
+            results = self.similarity_search(collection_name, query, n_results)
+            if results:
+                mmr_results = self.max_marginal_relevance_search(collection_name, query, n_results)
+                # RRF fusion for hybrid search
+                print("Combining results using RRF")
+                final_results = self.reciprocal_rank_fusion([results, mmr_results], k=60)
+        else:
+            print(f"Unknown search method: {search_method}")
+            return None
+        
+        return final_results
+    
+    def similarity_search(self, collection_name: str, query: str, n_results: int = 5):
+        """Search in collection"""
+        try:
+            collection = self.get_collection(collection_name)
+            if not collection:
+                return None
+            
+            results = collection.similarity_search_with_score(
+                query=query,
+                k=n_results
+            )
+            
+            # Format results to match original format
+            formatted_results = {
+                "ids": [],
+                "documents": [],
+                "metadatas": [],
+                "distances": []
+            }
+            
+            for doc, score in results:
+                formatted_results["documents"].append(doc.page_content)
+                formatted_results["metadatas"].append(doc.metadata)
+                formatted_results["ids"].append(doc.metadata.get("id", ""))
+                formatted_results["distances"].append(score)
+                
+            return formatted_results
+        except Exception as e:
+            print(f"Error searching: {e}")
+            return None
+
     def max_marginal_relevance_search(self, collection_name: str, query: str, n_results: int = 5, diversity: float = 0.3):
         """Perform MMR search in collection"""
         try:
@@ -217,9 +231,85 @@ class ChromaDBHandler:
                 formatted_results["documents"].append(doc.page_content)
                 formatted_results["metadatas"].append(doc.metadata)
                 formatted_results["ids"].append(doc.metadata.get("id", ""))
-                formatted_results["distances"].append(None)
+                formatted_results["distances"].append(1.0)  # MMR doesn't provide scores, use 1.0 as placeholder
                 
             return formatted_results
         except Exception as e:
             print(f"Error performing MMR search: {e}")
             return None
+    
+    def reciprocal_rank_fusion(self, results_list, k=60):
+        """
+        Perform RRF on multiple result sets
+        
+        Args:
+            results_list: List of search result dictionaries
+            k: Constant to prevent division by zero and reduce impact of high rankings
+        """
+        try:
+            # Track document scores across all result sets
+            doc_scores = {}
+            
+            # Process each result set
+            for results_idx, results in enumerate(results_list):
+                if not results or not isinstance(results, dict):
+                    continue
+                    
+                # Process each document by its rank position
+                for rank, (doc, meta) in enumerate(zip(
+                    results.get("documents", []),
+                    results.get("metadatas", [])
+                )):
+                    # Create a unique key for this document
+                    doc_id = meta.get("id", "")
+                    if doc_id:
+                        key = doc_id
+                    else:
+                        # Fallback to using document content hash if no ID
+                        key = hashlib.md5(doc.encode()).hexdigest()
+                        
+                    # Initialize document entry if needed
+                    if key not in doc_scores:
+                        doc_scores[key] = {
+                            "score": 0,
+                            "document": doc,
+                            "metadata": meta,
+                            "id": doc_id,
+                            "sources": []
+                        }
+                    
+                    # Add RRF score: 1/(k + rank)
+                    rrf_score = 1.0 / (k + rank)
+                    doc_scores[key]["score"] += rrf_score
+                    doc_scores[key]["sources"].append(f"{results_idx}:{rank}:{rrf_score:.4f}")
+            
+            # Sort documents by RRF score (descending)
+            sorted_docs = sorted(
+                doc_scores.values(), 
+                key=lambda x: x["score"], 
+                reverse=True
+            )
+            
+            # Format results
+            formatted_results = {
+                "ids": [],
+                "documents": [],
+                "metadatas": [],
+                "distances": [],  # Using RRF scores as inverse distances
+                "rrf_scores": [],  # Keep original RRF scores for reference
+                "rrf_sources": []  # Track which strategies contributed to each result
+            }
+            
+            for doc in sorted_docs:
+                formatted_results["ids"].append(doc["id"])
+                formatted_results["documents"].append(doc["document"])
+                formatted_results["metadatas"].append(doc["metadata"])
+                # Use 1/score as a distance-like metric (lower is better)
+                formatted_results["distances"].append(1.0 / doc["score"] if doc["score"] > 0 else float('inf'))
+                formatted_results["rrf_scores"].append(doc["score"])
+                formatted_results["rrf_sources"].append(doc["sources"])
+                
+            return formatted_results
+        except Exception as e:
+            print(f"Error in RRF fusion: {e}")
+            traceback.print_exc()
