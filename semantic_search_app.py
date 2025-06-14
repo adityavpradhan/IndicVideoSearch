@@ -11,12 +11,16 @@ NATIVE_MODELS = {
     "IndicSBERT-STS (l3cs)": "l3cube-pune/indic-sentence-similarity-sbert",
     "LaBSE": "sentence-transformers/LaBSE",
     "IndicBERT (ai4bharat)": "ai4bharat/IndicBERTv2-MLM-only",
-    "Krutim Vyakyarth": "krutrim-ai-labs/Vyakyarth",
+    "Krutim Vyakyarth (ola)": "krutrim-ai-labs/Vyakyarth",
+    "Roberta-base (Facebook)":"FacebookAI/xlm-roberta-base",
+    "Roberta-large (Facebook)":"FacebookAI/xlm-roberta-large",
+    "Rembert (google)":"google/rembert"
 }
 ENGLISH_MODELS = {
     "MiniLM (default)": "sentence-transformers/all-MiniLM-L6-v2",
     "BERT-base-nli": "sentence-transformers/bert-base-nli-mean-tokens",
-    "DistilRoBERTa": "sentence-transformers/all-distilroberta-v1"
+    "DistilRoBERTa": "sentence-transformers/all-distilroberta-v1",
+    "Mpnet":"sentence-transformers/all-mpnet-base-v2"
 }
 
 @st.cache_resource
