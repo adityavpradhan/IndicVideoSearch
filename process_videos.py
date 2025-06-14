@@ -56,7 +56,7 @@ def interactive_mode():
             print("\n" + "=" * 50)
             
             embedded_summary, collection = embedder.process_summary_json(output_path)
-            print(f"✅ Summary vectorized and stored in collection: {collection.name}")
+            print(f"✅ Summary vectorized and stored in collection: {collection}")
         except ValueError:
             print("❌ Invalid selection")
         except KeyboardInterrupt:

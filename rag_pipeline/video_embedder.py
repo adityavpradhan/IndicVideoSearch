@@ -9,6 +9,7 @@ import numpy as np
 from datetime import datetime
 from sentence_transformers import SentenceTransformer
 from rag_pipeline.chroma_handler import ChromaDBHandler
+from sentence_transformers import CrossEncoder
 
 class VideoEmbedder:
     def __init__(self, persist_directory="chroma_db", model_name="all-MiniLM-L6-v2"):
@@ -18,7 +19,11 @@ class VideoEmbedder:
         self.embedder = SentenceTransformer(model_name)
         
         # Initialize database handler (easily swappable)
-        self.db_handler = ChromaDBHandler(persist_directory)
+        self.db_handler = ChromaDBHandler(self.embedder, self.persist_directory)
+        self.reranking = True
+
+        if self.reranking:
+            self.reranker = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
     
     def load_summary_json(self, json_path):
         """Load video summary from JSON file"""
@@ -57,6 +62,7 @@ class VideoEmbedder:
         
         # Get or create collection
         collection = self.db_handler.get_or_create_collection(collection_name)
+        print(f"Using collection: {collection}")
         if not collection:
             raise Exception("Failed to create/get collection")
         
@@ -125,6 +131,25 @@ class VideoEmbedder:
     def search_videos(self, query, collection_name="video_summaries", n_results=5):
         """Search through vectorized video summaries"""
         results = self.db_handler.search(collection_name, query, n_results)
+        if self.reranking and results:
+            pairs = [(query, doc) for doc in results["documents"]]
+            # Get scores from reranker
+            rerank_scores = self.reranker.predict(pairs)
+            
+            # Create reranked results
+            reranked_indices = sorted(range(len(rerank_scores)), 
+                                    key=lambda i: rerank_scores[i], reverse=True)[:n_results]
+            
+            # Format reranked results
+            formatted_results = {"ids": [], "documents": [], "metadatas": [], "distances": []}
+            
+            for idx in reranked_indices:
+                formatted_results["documents"].append(results["documents"][idx])
+                formatted_results["metadatas"].append(results["metadatas"][idx])
+                formatted_results["ids"].append(results["ids"][idx])
+                formatted_results["distances"].append(rerank_scores[idx])  # Use reranker score
+                
+            return formatted_results
         return results
     
     def get_collection_info(self, collection_name="video_summaries"):

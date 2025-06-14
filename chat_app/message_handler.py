@@ -130,10 +130,10 @@ class MessageHandler:
         
         context = []
         sources = []
-        
-        documents = results['documents'][0]  # ChromaDB returns nested lists
-        metadatas = results['metadatas'][0]
-        distances = results['distances'][0]
+
+        documents = results['documents'] # ChromaDB returns nested lists
+        metadatas = results['metadatas']
+        distances = results['distances']
         
         for i, (doc, metadata, distance) in enumerate(zip(documents, metadatas, distances)):
             # Add document content to context
