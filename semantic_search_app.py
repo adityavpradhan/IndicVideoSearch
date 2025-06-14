@@ -1,6 +1,6 @@
 import streamlit as st
 from sentence_transformers import SentenceTransformer
-from googletrans import Translator
+from deep_translator import GoogleTranslator
 import chromadb
 from chromadb.config import Settings
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
@@ -23,7 +23,7 @@ ENGLISH_MODELS = {
 def load_models(native_name, english_name):
     native_model = SentenceTransformer(NATIVE_MODELS[native_name])
     english_model = SentenceTransformer(ENGLISH_MODELS[english_name])
-    translator = Translator()
+    translator = GoogleTranslator(source='auto', target='en') 
     return native_model, english_model, translator
 
 def render_app():
@@ -72,8 +72,8 @@ def render_app():
         with st.spinner("Translating and running English embedding..."):
             try:
                 def safe_translate(text):
-                    result = translator.translate(text, src='auto', dest='en')
-                    return result.text if hasattr(result, 'text') else text
+                    result = translator.translate(text)
+                    return result
 
                 corpus_en = [safe_translate(text) for text in corpus]
                 query_en = safe_translate(query)
