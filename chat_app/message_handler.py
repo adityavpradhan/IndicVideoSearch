@@ -40,7 +40,7 @@ class MessageHandler:
             }
             
             # Search with each query variation
-            st.write("🔍 Performing RAG-fusion search...")
+            st.write("Performing RAG-fusion search...")
             success_count = 0
             
             with st.spinner("Searching across multiple perspectives..."):
@@ -55,7 +55,7 @@ class MessageHandler:
                             combined_results['distances'].extend(results['distances'])
                             success_count += 1
                     except Exception as e:
-                        st.warning(f"⚠️ Search failed for query variation {i}: {str(e)}")
+                        st.warning(f"Search failed for query variation {i}: {str(e)}")
                         continue
             
             # Handle no results case
@@ -70,7 +70,7 @@ class MessageHandler:
             processed_results = self.process_search_results(combined_results)
             
             # Generate comprehensive response
-            st.write("✨ Generating response...")
+            st.write("Generating response...")
             ai_response = self._generate_ai_response(transformed_queries, processed_results, user_input)
             self.add_message("assistant", ai_response, "text")
             
@@ -94,49 +94,58 @@ class MessageHandler:
             self.add_message("assistant", f"Sorry, I couldn't understand the audio. {transcribed_text}", "error")
     
     def _generate_ai_response(self, transformed_queries: list, processed_results: dict, original_query: str) -> str:
-        """Generate AI response using LLM with system prompt and append sources"""
-        if self.llm:
-            try:
-                # Create query context from all transformed queries
-                query_context = original_query
-                if transformed_queries and len(transformed_queries) > 1:
-                    query_context += "\n\nI explored this question from multiple perspectives:\n"
-                    for i, q in enumerate(transformed_queries, 1):
-                        query_context += f"{i}. {q}\n"
+        if not self.llm:
+            return f"NON AI Response to your query: {original_query}"
 
-                # Combine system prompt with user query
-                messages = [
-                    {"role": "system", "content": self.system_prompt},
-                    {"role": "user", "content": query_context + "\n\nHere's relevant context from the videos:\n" + "\n".join(processed_results['context'])}
-                ]
+        try:
+            history = []
+            messages = st.session_state.get("messages", [])
+            pairs = []
+            i = 0
+            while i < len(messages) - 1:
+                if messages[i]["role"] == "user" and messages[i + 1]["role"] == "assistant":
+                    pairs.append((messages[i]["content"], messages[i + 1]["content"]))
+                i += 1
+            last_10_pairs = pairs[-10:]
 
-                sources = processed_results['sources']
-                
-                llm_response = self.llm.invoke(messages)
-                
-                # Extract the response content
-                if isinstance(llm_response, str):
-                    response_content = llm_response
-                elif hasattr(llm_response, 'content'):
-                    response_content = llm_response.content
-                else:
-                    response_content = f"Unexpected response format: {llm_response}"
-                
-                # Append sources to the response
-                if sources:
-                    response_content += "\n\n**Sources:**\n"
-                    for i, source in enumerate(sources, 1):
-                        response_content += f"{i}. {source}\n"
-                
-                return response_content
-                
-            except Exception as e:
-                st.error(f"Error generating AI response: {e}")
-                return f"Error generating response to: {original_query}"
-        else:
-            # For non-AI responses, still include sources if available
-            base_response = f"NON AI Response to your query: {original_query}"
-            return base_response
+            for user_msg, assistant_msg in last_10_pairs:
+                history.append({"role": "user", "content": user_msg})
+                history.append({"role": "assistant", "content": assistant_msg})
+
+            query_context = original_query
+            if transformed_queries and len(transformed_queries) > 1:
+                query_context += "\n\nI explored this question from multiple perspectives:\n"
+                for i, q in enumerate(transformed_queries, 1):
+                    query_context += f"{i}. {q}\n"
+
+            context_blob = "\n".join(processed_results['context'])
+            prompt = query_context + "\n\nHere's relevant context from the videos:\n" + context_blob
+
+            full_messages = [{"role": "system", "content": self.system_prompt}] + history + [{"role": "user", "content": prompt}]
+            st.write("📨 Prompt to LLM:", prompt[:500] + "..." if len(prompt) > 500 else prompt)
+
+            llm_response = self.llm.invoke(full_messages)
+
+            if isinstance(llm_response, str):
+                response_content = llm_response
+            elif hasattr(llm_response, 'content'):
+                response_content = llm_response.content
+            else:
+                response_content = f"Unexpected response format: {llm_response}"
+
+            sources = processed_results.get('sources', [])
+            if sources:
+                response_content += "\n\n**Sources:**\n"
+                for i, source in enumerate(sources, 1):
+                    response_content += f"{i}. {source}\n"
+
+            return response_content
+
+        except Exception as e:
+            error_msg = f"Error generating AI response: {e}"
+            st.error(error_msg)
+            print(error_msg)
+            return f"Error generating response to: {original_query}"
     
     def update_system_prompt(self, new_system_prompt: str):
         """Update the system prompt"""

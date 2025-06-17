@@ -12,22 +12,53 @@ class QueryTransformer:
         self.rag_fusion_prompt = """Generate 5 different versions of this query that capture different aspects and perspectives. 
         Each version should help find relevant educational video content.
         
-        Original Query: {query}
+        Previous context:
+        {history}
         
-        Consider these perspectives:
-        1. Basic explanation/definition
-        2. Practical applications/examples
-        3. Technical details/methodology
-        4. Related concepts/prerequisites
-        5. Common challenges/misconceptions
+        Current Query: {query}
+        
+        Consider these perspectives while maintaining context from the previous conversation:
+        1. Basic explanation/definition that builds on previous context
+        2. Practical applications/examples related to the ongoing discussion
+        3. Technical details/methodology in the current context
+        4. Related concepts/prerequisites considering previous questions
+        5. Common challenges/misconceptions in the current topic
         
         Return only the transformed queries, one per line."""
+    
+    def _get_chat_history(self, max_pairs: int = 3) -> str:
+        """Get recent chat history for context"""
+        if "messages" not in st.session_state:
+            return "No previous context."
+            
+        messages = st.session_state.messages
+        pairs = []
+        i = 0
+        while i < len(messages) - 1:
+            if messages[i]["role"] == "user" and messages[i + 1]["role"] == "assistant":
+                pairs.append((messages[i]["content"], messages[i + 1]["content"]))
+            i += 1
+        
+        # Get last N pairs (default 3) to keep context focused
+        recent_pairs = pairs[-max_pairs:]
+        
+        if not recent_pairs:
+            return "No previous context."
+            
+        history = "Recent conversation:\n"
+        for user_msg, assistant_msg in recent_pairs:
+            history += f"User: {user_msg}\nAssistant: {assistant_msg}\n\n"
+        
+        return history
     
     def _generate_diverse_queries(self, query: str) -> List[str]:
         """Generate diverse query variations using the LLM"""
         try:
             if not self.llm:
                 return [query]
+                
+            # Get recent chat history
+            history = self._get_chat_history()
                 
             # Format prompt for the LLM
             messages = [
@@ -37,7 +68,7 @@ class QueryTransformer:
                 },
                 {
                     "role": "user",
-                    "content": self.rag_fusion_prompt.format(query=query)
+                    "content": self.rag_fusion_prompt.format(history=history, query=query)
                 }
             ]
             
