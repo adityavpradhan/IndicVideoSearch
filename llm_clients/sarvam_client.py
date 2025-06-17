@@ -12,6 +12,7 @@ class SarvamClient:
         Initializes the SarvamAI client.
         Requires the SARVAMAI_API_KEY environment variable to be set.
         """
+        self.client = SarvamAI(api_subscription_key=os.getenv("SARVAMAI_API_KEY"))
         # Sarvam API Endpoint
         # API endpoint for speech-to-text translation
         self.api_url = "https://api.sarvam.ai/speech-to-text-translate"
@@ -135,42 +136,87 @@ class SarvamClient:
             print(f"Error during SarvamAI speech-to-text API call: {e}")
             return f"Error during transcription: {e}"
 
-    # def text_to_speech(self, text, voice="anushka", target_language_code="hi-IN"):
-    #     """
-    #     Converts text to speech using SarvamAI.
-    #     This function is a placeholder and needs to be expanded based on how
-    #     you want to handle the output (e.g., playing directly or saving to a file).
-    #     https://docs.sarvam.ai/api-reference-docs/cookbook/starter-notebooks/tts-api-tutorial
+    def chunk_text(self, text, max_length=2000):
+        """Splits text into chunks of at most max_length characters while preserving word boundaries."""
+        chunks = []
+        while len(text) > max_length:
+            split_index = text.rfind(" ", 0, max_length)  # Find the last space within limit
+            if split_index == -1:
+                split_index = max_length  # No space found, force split at max_length
+            chunks.append(text[:split_index].strip())  # Trim spaces before adding
+            text = text[split_index:].lstrip()  # Remove leading spaces for the next chunk
+        if text:
+            chunks.append(text.strip())  # Add the last chunk
+        return chunks
 
-    #     Args:
-    #         text (str): The text to convert to speech.
-    #         voice (str): The voice to use for speech synthesis.
-    #         target_language_code (str): The target language code (e.g., "hi-IN" for Hindi).
+    def translate_text(self, text, target_language="en"):
+        """
+        Translates text to the target language using SarvamAI.
+        This function expects the text to be translated and the target language code.
 
-    #     Returns:
-    #         The response from the SarvamAI TTS API, or None if an error occurs.
-    #     """
-    #     try:
-    #         response = self.client.text_to_speech.convert( # Corrected from 'client' to 'self.client'
-    #             text=text,
-    #             target_language_code=target_language_code,
-    #             speaker=voice,
-    #             enable_preprocessing=True
-    #         )
+        Args:
+            text (str): The text to translate.
+            target_language (str): The target language code (e.g., "en" for English).
 
-    #         # The 'play(response)' and 'save(response, "output.wav")' lines
-    #         # depend on external functions you need to implement or import.
-    #         # For example, to save the audio:
-    #         # if hasattr(response, 'audio_content'): # Or whatever attribute holds the audio data
-    #         #     with open("output.wav", "wb") as f:
-    #         #         f.write(response.audio_content)
-    #         #     print("TTS output saved to output.wav")
-    #         # else:
-    #         #     print("Could not save TTS output: audio_content not found in response.")
+        Returns:
+            str: The translated text, or an error message if translation fails.
+        """
+        try:
+            # Split the text into chunks of 500 characters
+            english_text_chunks = self.chunk_text(text, max_length=500)
+            translated_texts = []
+            for idx, chunk in enumerate(english_text_chunks):
+                response = self.client.text.translate(
+                    input=chunk,
+                    source_language_code="en-IN",
+                    target_language_code=target_language,
+                    speaker_gender="Female",
+                    mode="formal",
+                    model="sarvam-translate:v1",
+                    enable_preprocessing=False,
+                )
+                translated_text = response.translated_text
+                print(f"\n=== Translated Chunk {idx + 1} ===\n{translated_text}\n")
+                translated_texts.append(translated_text)
+            # Combine all translated chunks
+            final_translation = "\n".join(translated_texts)
+            return final_translation
+        except Exception as e:
+            print(f"Error during SarvamAI translation API call: {e}")
+            return f"Error during translation: {e}"
 
-    #         print(f"TTS API call successful. Response: {response}") # Log or inspect the response
-    #         return response
-    #     except Exception as e:
-    #         print(f"Error during SarvamAI text-to-speech API call: {e}")
-    #         return None  # Return None on error
+    def text_to_speech(self, text, voice="anushka", target_language_code="hi-IN"):
+        """
+        Converts text to speech using SarvamAI.
+        This function is a placeholder and needs to be expanded based on how
+        you want to handle the output (e.g., playing directly or saving to a file).
+        https://docs.sarvam.ai/api-reference-docs/cookbook/starter-notebooks/tts-api-tutorial
+
+        Args:
+            text (str): The text to convert to speech.
+            voice (str): The voice to use for speech synthesis.
+            target_language_code (str): The target language code (e.g., "hi-IN" for Hindi).
+
+        Returns:
+            The response from the SarvamAI TTS API, or None if an error occurs.
+        """
+        try:
+            # First translate the English text to the target language
+            translated_text = self.translate_text(
+                text=text,
+                target_language=target_language_code
+            )
+            # Now convert the translated text to speech
+            response = self.client.text_to_speech.convert(
+                text=translated_text,
+                target_language_code=target_language_code,
+                speaker=voice,
+                enable_preprocessing=True
+            )
+
+            # 'save(response, "output.wav")' can be called to save the audio to a file
+            return response
+        except Exception as e:
+            print(f"Error during SarvamAI text-to-speech API call: {e}")
+            return None  # Return None on error
         
