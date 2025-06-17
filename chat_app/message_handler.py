@@ -3,8 +3,8 @@ from chat_app.query_transformation import QueryTransformer
 from rag_pipeline.video_embedder import VideoEmbedder
 from sarvamai.play import play, save
 from llm_clients.sarvam_client import SarvamClient
-from llm_clients.gemini_client import GeminiClient
-from llm_clients.openai_client import OpenAIClient
+# from llm_clients.gemini_client import GeminiClient
+# from llm_clients.openai_client import OpenAIClient
 
 class MessageHandler:
     """Handles chat message processing and display"""
