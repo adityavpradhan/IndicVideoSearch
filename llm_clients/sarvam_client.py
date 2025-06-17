@@ -202,10 +202,14 @@ class SarvamClient:
         """
         try:
             # First translate the English text to the target language
-            translated_text = self.translate_text(
-                text=text,
-                target_language=target_language_code
-            )
+            # Translate only if the target language is not English
+            if target_language_code == "en-IN":
+                translated_text = text
+            else:
+                translated_text = self.translate_text(
+                    text=text,
+                    target_language=target_language_code
+                )
             # Now convert the translated text to speech
             response = self.client.text_to_speech.convert(
                 text=translated_text,
