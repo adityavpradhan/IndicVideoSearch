@@ -131,7 +131,7 @@ class MessageHandler:
                         )
                         lang = c2.selectbox(
                             "Language",
-                            ["en", "hi-IN", "ta-IN", "kn-IN", "ml-IN"],
+                            ["en-IN", "hi-IN", "ta-IN", "kn-IN", "ml-IN"],
                             key=f"tts_lang_{idx}"
                         )
                         if c3.button("🔊 Play Audio", key=f"tts_play_{idx}"):
