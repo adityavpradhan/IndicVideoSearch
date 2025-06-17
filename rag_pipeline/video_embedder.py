@@ -18,7 +18,11 @@ class VideoEmbedder:
         self.model_name = model_name
         self.embedder = SentenceTransformer(model_name)
         
-        # Initialize database handler (easily swappable)
+        # Disable CUDA to avoid torch event loop issues
+        import os
+        os.environ['CUDA_VISIBLE_DEVICES'] = ''
+        
+        # Initialize database handler
         self.db_handler = ChromaDBHandler(self.embedder, self.persist_directory)
         self.reranking = True
 

@@ -1,71 +1,89 @@
-from langchain.prompts import PromptTemplate
-from langchain_core.output_parsers import StrOutputParser
+from typing import List, Dict, Optional
 import streamlit as st
+
 class QueryTransformer:
-    """Handles query transformation using Langchain"""
+    """
+    Implements RAG-fusion for query transformation.
+    Generates multiple perspectives of the same query to improve retrieval coverage.
+    """
     
     def __init__(self, llm):
         self.llm = llm
-        self.decomposition_chain = None
-        self.hyde_chain = None
-        self._setup_chains()
+        self.rag_fusion_prompt = """Generate 5 different versions of this query that capture different aspects and perspectives. 
+        Each version should help find relevant educational video content.
+        
+        Original Query: {query}
+        
+        Consider these perspectives:
+        1. Basic explanation/definition
+        2. Practical applications/examples
+        3. Technical details/methodology
+        4. Related concepts/prerequisites
+        5. Common challenges/misconceptions
+        
+        Return only the transformed queries, one per line."""
     
-    def _setup_chains(self):
-        """Setup Langchain chains for different transformation methods"""
-        if not self.llm:
-            return
+    def _generate_diverse_queries(self, query: str) -> List[str]:
+        """Generate diverse query variations using the LLM"""
+        try:
+            if not self.llm:
+                return [query]
+                
+            # Format prompt for the LLM
+            messages = [
+                {
+                    "role": "system",
+                    "content": "You are a helpful assistant that generates diverse search queries for educational video content."
+                },
+                {
+                    "role": "user",
+                    "content": self.rag_fusion_prompt.format(query=query)
+                }
+            ]
             
-        # Decomposition chain using modern syntax
-        decomposition_prompt = PromptTemplate(
-            input_variables=["query"],
-            template="Decompose the following user query into sub-queries: {query}"
-        )
-        self.decomposition_chain = decomposition_prompt | self.llm | StrOutputParser()
-        
-        # HyDE chain using modern syntax
-        hyde_prompt = PromptTemplate(
-            input_variables=["query"],
-            template="Generate a hypothetical document that answers the query: {query}"
-        )
-        self.hyde_chain = hyde_prompt | self.llm | StrOutputParser()
+            # Get response from LLM
+            response = self.llm.invoke(messages)
+            
+            # Extract content from response
+            if isinstance(response, str):
+                content = response
+            elif hasattr(response, 'content'):
+                content = response.content
+            else:
+                content = str(response)
+                
+            # Split into individual queries and clean up
+            queries = [q.strip() for q in content.split('\n') if q.strip()]
+            
+            # Always include original query
+            if query not in queries:
+                queries.insert(0, query)
+                
+            return queries
+            
+        except Exception as e:
+            st.error(f"Error generating diverse queries: {e}")
+            return [query]
     
-    def transform_query(self, user_query: str, method: str = "decomposition") -> str:
-        """Transform query using specified method"""
-        if not self.llm:
-            st.warning("Langchain LLM not configured. Skipping query transformation.")
-            return user_query
+    def transform_query(self, user_query: str, method: str = "rag_fusion") -> List[str]:
+        """
+        Transform the user query using RAG-fusion approach.
+        Returns a list of diverse query variations to be used for retrieval.
+        """
+        if method != "rag_fusion":
+            return [user_query]
+            
+        st.write("🔄 Applying RAG-fusion to generate diverse queries...")
         
-        if method == "decomposition":
-            return self._apply_decomposition(user_query)
-        elif method == "hyde":
-            return self._apply_hyde(user_query)
+        # Generate diverse query variations
+        queries = self._generate_diverse_queries(user_query)
+        
+        # Display generated queries
+        if len(queries) > 1:
+            st.info("Generated query variations:")
+            for i, q in enumerate(queries):
+                st.write(f"{i+1}. {q}")
         else:
-            return user_query
-    
-    def _apply_decomposition(self, user_query: str) -> str:
-        """Apply query decomposition"""
-        if not self.decomposition_chain:
-            st.warning("Decomposition chain not initialized. Skipping transformation.")
-            return user_query
-        
-        try:
-            transformed_query = self.decomposition_chain.invoke({"query": user_query})
-            st.info(f"Decomposed Query: {transformed_query}")
-            return transformed_query
-        except Exception as e:
-            st.error(f"Error during query decomposition: {e}")
-            return user_query
-    
-    def _apply_hyde(self, user_query: str) -> str:
-        """Apply HyDE transformation"""
-        if not self.hyde_chain:
-            st.warning("HyDE chain not initialized. Skipping transformation.")
-            return user_query
-        
-        try:
-            hypothetical_document = self.hyde_chain.invoke({"query": user_query})
-            st.info(f"Hypothetical Document (HyDE): {hypothetical_document[:200]}...")
-            return f"Query based on hypothetical document: {hypothetical_document}"
-        except Exception as e:
-            st.error(f"Error during HyDE generation: {e}")
-            return user_query
+            st.warning("Could not generate diverse queries, using original query only.")
+            
+        return queries
