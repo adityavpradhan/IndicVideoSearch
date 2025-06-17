@@ -1,6 +1,11 @@
 import streamlit as st
 from chat_app.query_transformation import QueryTransformer
 from rag_pipeline.video_embedder import VideoEmbedder
+from sarvamai.play import play, save
+from llm_clients.sarvam_client import SarvamClient
+# from llm_clients.gemini_client import GeminiClient
+# from llm_clients.openai_client import OpenAIClient
+
 class MessageHandler:
     """Handles chat message processing and display"""
     
@@ -94,11 +99,16 @@ class MessageHandler:
         self.system_prompt = new_system_prompt
     
     def display_chat_history(self):
-        """Display chat messages"""
+        """Display chat messages, and for assistant text add TTS controls."""
         st.markdown("---")
         st.subheader("Chat History")
-        
-        for message in st.session_state.messages:
+
+        # instantiate TTS clients once
+        sarvam = SarvamClient()
+        # gemini = GeminiClient()
+        # openai = OpenAIClient()
+
+        for idx, message in enumerate(st.session_state.messages):
             with st.chat_message(message["role"]):
                 if message["type"] == "audio_info":
                     st.markdown(f"_{message['content']}_")
@@ -107,7 +117,54 @@ class MessageHandler:
                 elif message["type"] == "error":
                     st.error(message["content"])
                 else:
+                    # must be text
                     st.write(message["content"])
+
+                    # only for assistant messages allow Text To Speech
+                    if message["role"] == "assistant":
+                        # create three columns for controls
+                        c1, c2, c3 = st.columns([1,1,1], gap="small")
+                        model = c1.selectbox(
+                            "Model",
+                            ["Sarvam"], # Commented out "OpenAI" and "Gemini" for now
+                            key=f"tts_model_{idx}"
+                        )
+                        lang = c2.selectbox(
+                            "Language",
+                            ["en-IN", "hi-IN", "ta-IN", "kn-IN", "ml-IN"],
+                            key=f"tts_lang_{idx}"
+                        )
+                        if c3.button("🔊 Play Audio", key=f"tts_play_{idx}"):
+                            text = message["content"]
+                            # call the right client
+                            if model == "Sarvam":
+                                audio_obj = sarvam.text_to_speech(
+                                    text,
+                                    voice="anushka",
+                                    target_language_code=lang
+                                )
+                                # Sarvam returns a response object 
+                                # with bytes under `.audio_content`
+                                audio_bytes = audio_obj
+                            elif model == "OpenAI":
+                                buf = openai.text_to_speech(
+                                    text,
+                                    language_code=lang,
+                                    voice="alloy"
+                                )
+                                audio_bytes = buf.getvalue()
+                            else:  # Gemini
+                                buf = gemini.text_to_speech(
+                                    text,
+                                    voice_name=f"{lang}-Standard-C"
+                                )
+                                audio_bytes = buf.getvalue()
+
+                            # finally play
+                            if model == "Sarvam":
+                                play(audio_bytes)
+                            else:
+                                st.audio(audio_bytes, format="audio/wav")
     
     def clear_chat_history(self):
         """Clear chat history"""
