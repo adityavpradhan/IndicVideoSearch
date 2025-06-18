@@ -7,13 +7,12 @@ from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunct
 
 # model options for the semantic search tool
 NATIVE_MODELS = {
-    "Muril (Google)": "google/muril-base-cased",
-    "IndicSBERT-STS (l3cs)": "l3cube-pune/indic-sentence-similarity-sbert",
+    "Muril": "google/muril-base-cased",
+    "IndicSBERT": "l3cube-pune/indic-sentence-bert-nli",
     "LaBSE": "sentence-transformers/LaBSE",
-    "IndicBERT (ai4bharat)": "ai4bharat/IndicBERTv2-MLM-only",
-    "Krutim Vyakyarth (ola)": "krutrim-ai-labs/Vyakyarth",
-    "Roberta-base (Facebook)":"FacebookAI/xlm-roberta-base",
-    "Roberta-large (Facebook)":"FacebookAI/xlm-roberta-large",
+    "IndicBERT": "ai4bharat/IndicBERTv2-MLM-only",
+    "Krutim Vyakyarth": "krutrim-ai-labs/Vyakyarth",
+    "Roberta-base":"FacebookAI/xlm-roberta-base",
     "Rembert (google)":"google/rembert"
 }
 ENGLISH_MODELS = {
