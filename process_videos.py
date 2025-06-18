@@ -11,7 +11,8 @@ def interactive_mode():
     print()
     
     summarizer = VideoSummarizer()
-    embedder = VideoEmbedder()
+    embedder = VideoEmbedder(model_name="l3cube-pune/indic-sentence-bert-nli")
+    embedder.delete_collection(collection_name="video_summaries")
     
     while True:
         # Check for videos directly

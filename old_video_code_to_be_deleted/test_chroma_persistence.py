@@ -8,7 +8,7 @@ def test_persistence():
     print("-" * 25)
     
     # Initialize the embedding function - must match what was used to create the store
-    embedding_function = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    embedding_function = HuggingFaceEmbeddings(model_name="l3cube-pune/indic-sentence-bert-nli")
     
     # Load the existing Chroma store
     print("\nLoading vectorstore from chroma_db...")

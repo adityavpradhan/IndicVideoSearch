@@ -21,6 +21,7 @@ from langchain_community.vectorstores import Chroma
 import chromadb
 from chromadb.config import Settings
 from sentence_transformers import SentenceTransformer
+from langchain_huggingface import HuggingFaceEmbeddings
 
 class VideoSummarizer:
     def __init__(self):
@@ -553,7 +554,7 @@ class VideoSummarizer:
         )
         
         # Initialize the embedding model
-        embedder = SentenceTransformer("all-MiniLM-L6-v2")
+        embedder = HuggingFaceEmbeddings("l3cube-pune/indic-sentence-bert-nli")
         
         # Add documents to collection
         documents = []
