@@ -46,7 +46,6 @@ class MessageHandler:
             with st.spinner("Searching across multiple perspectives..."):
                 for i, query in enumerate(transformed_queries, 1):
                     try:
-                        st.write(f"Searching perspective {i}/{len(transformed_queries)}...")
                         results = self.video_embedder.search_videos(query, n_results=3)
                         
                         if results and isinstance(results, dict) and 'documents' in results:

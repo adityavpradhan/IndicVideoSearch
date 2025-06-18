@@ -1,5 +1,6 @@
 from typing import List, Dict, Optional
 import streamlit as st
+import json
 
 class QueryTransformer:
     """
@@ -11,20 +12,17 @@ class QueryTransformer:
         self.llm = llm
         self.rag_fusion_prompt = """Generate 5 different versions of this query that capture different aspects and perspectives. 
         Each version should help find relevant educational video content.
-        
-        Previous context:
         {history}
-        
         Current Query: {query}
         
-        Consider these perspectives while maintaining context from the previous conversation:
-        1. Basic explanation/definition that builds on previous context
-        2. Practical applications/examples related to the ongoing discussion
-        3. Technical details/methodology in the current context
-        4. Related concepts/prerequisites considering previous questions
-        5. Common challenges/misconceptions in the current topic
+        Consider these perspectives:
+        1. Basic explanation/definition
+        2. Practical applications/examples
+        3. Technical details/methodology
+        4. Related concepts/prerequisites
+        5. Common challenges/misconceptions
         
-        Return only the transformed queries, one per line."""
+        Return ONLY the transformed queries, one per line. Do not include numbers, labels, or any other text."""
     
     def _get_chat_history(self, max_pairs: int = 3) -> str:
         """Get recent chat history for context"""
@@ -51,6 +49,16 @@ class QueryTransformer:
         
         return history
     
+    def _clean_query(self, query: str) -> str:
+        """Clean up query by removing leading numbers, dots, and extra whitespace"""
+        # Remove leading numbers and dots (e.g., "1.", "2.", etc.)
+        cleaned = query.strip()
+        while cleaned and cleaned[0].isdigit():
+            cleaned = cleaned[1:].strip()
+        if cleaned.startswith('.'):
+            cleaned = cleaned[1:].strip()
+        return cleaned
+
     def _generate_diverse_queries(self, query: str) -> List[str]:
         """Generate diverse query variations using the LLM"""
         try:
@@ -64,7 +72,7 @@ class QueryTransformer:
             messages = [
                 {
                     "role": "system",
-                    "content": "You are a helpful assistant that generates diverse search queries for educational video content."
+                    "content": "You are a helpful assistant that generates diverse search queries for educational video content. Return the queries as a simple list, one per line."
                 },
                 {
                     "role": "user",
@@ -82,18 +90,22 @@ class QueryTransformer:
                 content = response.content
             else:
                 content = str(response)
-                
-            # Split into individual queries and clean up
-            queries = [q.strip() for q in content.split('\n') if q.strip()]
             
-            # Always include original query
+            # Clean and filter queries
+            queries = [
+                self._clean_query(q) for q in content.split('\n') 
+                if q.strip() and not q.startswith('{') and not q.startswith('}') 
+                and not q.lower().startswith('here') and not q.lower().startswith('"queries"')
+            ]
+            
+            # Always include original query if not present
             if query not in queries:
                 queries.insert(0, query)
-                
+            
             return queries
             
         except Exception as e:
-            st.error(f"Error generating diverse queries: {e}")
+            st.error(f"Error generating diverse queries: {str(e)}")
             return [query]
     
     def transform_query(self, user_query: str, method: str = "rag_fusion") -> List[str]:
@@ -111,9 +123,7 @@ class QueryTransformer:
         
         # Display generated queries
         if len(queries) > 1:
-            st.info("Generated query variations:")
-            for i, q in enumerate(queries):
-                st.write(f"{i+1}. {q}")
+            st.info("Generated query variations:\n")
         else:
             st.warning("Could not generate diverse queries, using original query only.")
             
