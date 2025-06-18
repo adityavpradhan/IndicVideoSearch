@@ -27,20 +27,61 @@ class MessageHandler:
         })
     
     def process_text_input(self, user_input: str):
-        """Process text input and generate AI response"""
-        self.add_message("user", user_input, "text")
-        
-        # Transform query
-        transformed_query = self.query_transformer.transform_query(user_input, "None")
-        st.write(f"Transformed Text Query (Langchain): {transformed_query}")
-        st.write("Searching for relevant videos...")
-        # I am calling RAG Pipeline here assuming that only one transformed query is generated. But 
-        # Generate AI response with system prompt
-        raw_results = self.video_embedder.search_videos(transformed_query)
-        processed_results = self.process_search_results(raw_results)
-
-        ai_response = self._generate_ai_response(transformed_query, processed_results, user_input)
-        self.add_message("assistant", ai_response, "text")
+        """Process text input and generate AI response using RAG-fusion"""
+        try:
+            # Add user message
+            self.add_message("user", user_input, "text")
+            
+            # Generate diverse queries using RAG-fusion
+            transformed_queries = self.query_transformer.transform_query(user_input, "rag_fusion")
+            if not transformed_queries:
+                transformed_queries = [user_input]
+            
+            # Initialize combined results
+            combined_results = {
+                'documents': [],
+                'metadatas': [],
+                'distances': []
+            }
+            
+            # Search with each query variation
+            st.write("Performing RAG-fusion search...")
+            success_count = 0
+            
+            with st.spinner("Searching across multiple perspectives..."):
+                for i, query in enumerate(transformed_queries, 1):
+                    try:
+                        results = self.video_embedder.search_videos(query, n_results=3)
+                        
+                        if results and isinstance(results, dict) and 'documents' in results:
+                            combined_results['documents'].extend(results['documents'])
+                            combined_results['metadatas'].extend(results['metadatas'])
+                            combined_results['distances'].extend(results['distances'])
+                            success_count += 1
+                    except Exception as e:
+                        st.warning(f"Search failed for query variation {i}: {str(e)}")
+                        continue
+            
+            # Handle no results case
+            if success_count == 0:
+                st.warning("No relevant video content found.")
+                self.add_message("assistant", 
+                               "I couldn't find any relevant video content. Please try rephrasing your question.", 
+                               "text")
+                return
+                
+            # Process and generate response
+            processed_results = self.process_search_results(combined_results)
+            
+            # Generate comprehensive response
+            st.write("Generating response...")
+            ai_response = self._generate_ai_response(transformed_queries, processed_results, user_input)
+            self.add_message("assistant", ai_response, "text")
+            
+        except Exception as e:
+            error_msg = f"Error processing your request: {str(e)}"
+            st.error(error_msg)
+            self.add_message("assistant", error_msg, "error")
     
     def process_audio_input(self, transcribed_text: str, audio_bytes: int):
         """Process audio input and generate AI response"""
@@ -56,43 +97,59 @@ class MessageHandler:
             st.error(f"Transcription failed: {transcribed_text}")
             self.add_message("assistant", f"Sorry, I couldn't understand the audio. {transcribed_text}", "error")
     
-    def _generate_ai_response(self, transformed_query: str, processed_results, original_query: str) -> str:
-        """Generate AI response using LLM with system prompt and append sources"""
-        if self.llm:
-            try:
-                # Combine system prompt with user query
-                messages = [
-                    {"role": "system", "content": self.system_prompt},
-                    {"role": "user", "content": transformed_query + "Here's additional context for the user query. Answer his question based on this context:" + str(processed_results['context'])}
-                ]
-    
-                sources = processed_results['sources']
-                
-                llm_response = self.llm.invoke(messages)
-                
-                # Extract the response content
-                if isinstance(llm_response, str):
-                    response_content = llm_response
-                elif hasattr(llm_response, 'content'):
-                    response_content = llm_response.content
-                else:
-                    response_content = f"Unexpected response format: {llm_response}"
-                
-                # Append sources to the response
-                if sources:
-                    response_content += "\n\n**Sources:**\n"
-                    for i, source in enumerate(sources, 1):
-                        response_content += f"{i}. {source}\n"
-                
-                return response_content
-                
-            except Exception as e:
-                st.error(f"Error generating AI response: {e}")
-                return f"Error generating response to: {original_query}"
-        else:
-            # For non-AI responses, still include sources if available
-            base_response = f"NON AI Response to your query: {original_query}"
-            return base_response
+    def _generate_ai_response(self, transformed_queries: list, processed_results: dict, original_query: str) -> str:
+        if not self.llm:
+            return f"NON AI Response to your query: {original_query}"
+
+        try:
+            history = []
+            messages = st.session_state.get("messages", [])
+            pairs = []
+            i = 0
+            while i < len(messages) - 1:
+                if messages[i]["role"] == "user" and messages[i + 1]["role"] == "assistant":
+                    pairs.append((messages[i]["content"], messages[i + 1]["content"]))
+                i += 1
+            last_10_pairs = pairs[-10:]
+
+            for user_msg, assistant_msg in last_10_pairs:
+                history.append({"role": "user", "content": user_msg})
+                history.append({"role": "assistant", "content": assistant_msg})
+
+            query_context = original_query
+            if transformed_queries and len(transformed_queries) > 1:
+                query_context += "\n\nI explored this question from multiple perspectives:\n"
+                for i, q in enumerate(transformed_queries, 1):
+                    query_context += f"{i}. {q}\n"
+
+            context_blob = "\n".join(processed_results['context'])
+            prompt = query_context + "\n\nHere's relevant context from the videos:\n" + context_blob
+
+            full_messages = [{"role": "system", "content": self.system_prompt}] + history + [{"role": "user", "content": prompt}]
+            st.write("📨 Prompt to LLM:", prompt[:500] + "..." if len(prompt) > 500 else prompt)
+
+            llm_response = self.llm.invoke(full_messages)
+
+            if isinstance(llm_response, str):
+                response_content = llm_response
+            elif hasattr(llm_response, 'content'):
+                response_content = llm_response.content
+            else:
+                response_content = f"Unexpected response format: {llm_response}"
+
+            sources = processed_results.get('sources', [])
+            if sources:
+                response_content += "\n\n**Sources:**\n"
+                for i, source in enumerate(sources, 1):
+                    response_content += f"{i}. {source}\n"
+
+            return response_content
+
+        except Exception as e:
+            error_msg = f"Error generating AI response: {e}"
+            st.error(error_msg)
+            print(error_msg)
+            return f"Error generating response to: {original_query}"
     
     def update_system_prompt(self, new_system_prompt: str):
         """Update the system prompt"""
@@ -181,35 +238,65 @@ class MessageHandler:
             return "00:00"
 
     def process_search_results(self, results):
-        """Process ChromaDB results into context and sources format"""
-        if not results or not results.get('documents'):
+        """Process ChromaDB results into context and sources format with deduplication, limiting to top 5 results"""
+        if not results or not isinstance(results, dict) or 'documents' not in results:
             return {"context": [], "sources": []}
         
-        context = []
-        sources = []
-
-        documents = results['documents'] # ChromaDB returns nested lists
-        metadatas = results['metadatas']
-        distances = results['distances']
+        # Create a list to store all results with their distances for sorting
+        all_results = []
+        seen_content = set()  # Track unique content
         
-        for i, (doc, metadata, distance) in enumerate(zip(documents, metadatas, distances)):
-            # Add document content to context
-            context.append(doc)
+        try:
+            # Prepare data
+            documents = results.get('documents', [])
+            metadatas = results.get('metadatas', [])
+            distances = results.get('distances', [])
             
-            # Format source information
-            video_name = metadata.get('video_name', 'Unknown Video')
-            start_time = metadata.get('start_time', '0')
-            end_time = metadata.get('end_time', '0')
+            # Ensure all lists have the same length
+            min_length = min(len(documents), len(metadatas), len(distances))
             
-            # Format timestamps
-            start_formatted = self.format_time(start_time)
-            end_formatted = self.format_time(end_time)
+            # Combine all results with their distances
+            for i in range(min_length):
+                doc = documents[i]
+                metadata = metadatas[i]
+                distance = distances[i]
+                
+                # Skip empty or duplicate content
+                if not doc or doc in seen_content:
+                    continue
+                seen_content.add(doc)
+                
+                video_name = metadata.get('video_name', 'Unknown Video')
+                start_time = metadata.get('start_time', '0')
+                end_time = metadata.get('end_time', '0')
+                
+                try:
+                    start_formatted = self.format_time(start_time)
+                    end_formatted = self.format_time(end_time)
+                    source = f"{video_name} [{start_formatted} - {end_formatted}]"
+                except Exception as e:
+                    print(f"Error formatting source: {e}")
+                    source = f"{video_name} [timestamp error]"
+                
+                all_results.append({
+                    'content': doc.strip(),
+                    'source': source,
+                    'distance': distance
+                })
             
-            # Create source string
-            source = f"{video_name} - [{start_formatted} - {end_formatted}]"
-            sources.append(source)
-        
-        return {
-            "context": context,
-            "sources": sources
-        }
+            # Sort by distance (lower is better) and take top 5
+            all_results.sort(key=lambda x: x['distance'])
+            top_results = all_results[:5]
+            
+            # Separate into context and sources
+            context = [r['content'] for r in top_results]
+            sources = [r['source'] for r in top_results]
+            
+            return {
+                "context": context,
+                "sources": sources
+            }
+            
+        except Exception as e:
+            print(f"Error processing search results: {e}")
+            return {"context": [], "sources": []}
