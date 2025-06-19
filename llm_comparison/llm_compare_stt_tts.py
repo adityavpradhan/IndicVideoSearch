@@ -59,10 +59,9 @@ import soundfile as sf
 # export HF_TOKEN="YOUR_HUGGINGFACE_TOKEN"
 # export GOOGLE_APPLICATION_CREDENTIALS="/path/to/your/google-credentials.json"
 
-# Initialize clients (assuming API keys and credentials are set)
+# Initialize clients
 try:
     sarvam_client = SarvamClient()
-    # genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
     gemini_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
     google_speech_client = speech.SpeechClient()
     # google_tts_client = texttospeech.TextToSpeechClient()
@@ -206,7 +205,6 @@ async def google_stt(audio_path, lang_code):
             encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
             sample_rate_hertz=sample_rate,
             language_code=lang_code,
-            # audio_channel_count=1, # Explicitly stating mono can sometimes help
         )
         response = google_speech_client.recognize(config=config, audio=audio)
         return " ".join([result.alternatives[0].transcript for result in response.results])
@@ -245,6 +243,7 @@ async def gemini_stt(audio_path, lang_code):
         )
         # Clean up the uploaded file after transcription
         # genai.delete_file(gemini_file.name)
+
         print("Gemini STT: ", response.text)
         return response.text
     except Exception as e:
@@ -399,21 +398,6 @@ def plot_results(df):
                 print(f"\nComparison plot saved to {filename}")
                 plt.show()
 
-# def display_tables(df):
-#     """Pivots the DataFrame to create and print summary tables."""
-#     # STT WER Table
-#     stt_wer_table = df[(df['Phase'] == 'STT') & (df['Metric'] == 'WER')].pivot_table(
-#         index='Language', columns='Provider', values='Value'
-#     )
-#     print("\n--- STT Word Error Rate (WER) Summary Table ---")
-#     print(stt_wer_table.to_markdown(floatfmt=".4f"))
-
-#     # TTS Intelligibility WER Table
-#     tts_wer_table = df[(df['Phase'] == 'TTS_Intelligibility') & (df['Metric'] == 'WER')].pivot_table(
-#         index='Language', columns='Provider', values='Value'
-#     )
-#     print("\n--- TTS Intelligibility WER Summary Table ---")
-#     print(tts_wer_table.to_markdown(floatfmt=".4f"))
 
 def display_tables(df):
     """Pivots the DataFrame to create and print summary tables for WER and CER."""
@@ -567,7 +551,7 @@ if __name__ == "__main__":
     # Run the main evaluation
     evaluation_df = asyncio.run(main_evaluation_loop())
     
-    print("\n\n{'='*25} FINAL RESULTS {'='*25}")
+    print(f"\n\n{'='*25} FINAL RESULTS {'='*25}")
     
     # Display results in clean tables
     display_tables(evaluation_df)
