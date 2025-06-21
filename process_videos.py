@@ -1,7 +1,7 @@
 import os
 import time
-# from rag_pipeline.video_summarizer_Gemini_Chunk import VideoSummarizer
-from rag_pipeline.video_summarizer_OpenAI_Frame import VideoSummarizer
+from rag_pipeline.video_summarizer_Gemini_Chunk import VideoSummarizer
+# from rag_pipeline.video_summarizer_OpenAI_Frame import VideoSummarizer
 from rag_pipeline.video_embedder import VideoEmbedder
 
 def interactive_mode():
@@ -11,7 +11,7 @@ def interactive_mode():
     
     summarizer = VideoSummarizer()
     embedder = VideoEmbedder(model_name="all-MiniLM-L6-v2")
-    embedder.delete_collection(collection_name="video_summaries")
+    # embedder.delete_collection(collection_name="video_summaries")
     
     while True:
         videos_dir = "videos"

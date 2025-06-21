@@ -12,7 +12,7 @@
 ```bash
 export SARVAMAI_API_KEY="<YOUR-KEY>"
 export GEMINI_API_KEY="<YOUR-KEY>"
-export GOOGLE_API_KEY="<SAME KEY>" #Code is referencing it in 2 different ways. needs to be fixed by relevant team member
+export GOOGLE_API_KEY="<SAME KEY AS ABOVE>"
 ```
  - Install libraries
  ```bash
@@ -47,14 +47,3 @@ Currently the query_transformation.py file contains the decomposition & hyde met
 the llm_clients folder now has the sarvam_client. Karthik works on this. Other LLM clients can also be moved here. That is work for the respective team member.
 
 config.py has some configurations including the current chat LLM model apart from Sarvam AI. It is a gemini model. The code in chat_app/message_handler.py will use this llm model. Currently it is specific to Gemini models only as that is how Karthik had implemented it. This can also be modified based on the final chat model Karthik Identifies.
-
- # [OLD] Video RAG Pipeline
- The video RAG pipeline need not necessarily be part of the chat app. We can preprocess the data, store it in a vector DB and call the search functionality alone. This will keep the chat app separate from the video processing pipeline. RAG Pipeline code can be in separate python classes. We will just import search.
-
- # [OLD] Video Summary Pipeline
- This will create a summary JSON file for the selected videos. Process the selected video (from the video folder) and Save the summary to the output folder. Each video is segmented into 10-second chunks, with The Video Summary Pipeline processes selected videos to create comprehensive JSON summary files stored in the output folder. Each video is automatically segmented into 10-second chunks, with both audio and visual content analyzed by Gemini AI. These summaries include precise timestamps, visual scene descriptions, spoken content transcriptions, and contextual information, all organized in  JSON format.
-
- Run Video Summary Pipline:
-  ```bash
- python video_rag.py 
- ```     

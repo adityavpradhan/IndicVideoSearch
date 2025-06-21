@@ -114,12 +114,12 @@ class VideoSummarizer:
                 """
                 
                 contenttoGemini = []
-                contenttoGemini.append(types.Part.from_text(text=prompt))
                 contenttoGemini.append(types.Part.from_bytes(
                     data=video_data,
                     mime_type='video/mp4',
                 ))
-                
+                contenttoGemini.append(types.Part.from_text(text=prompt))
+
                 generation_config = {
                     "max_output_tokens": 4096,
                     "temperature": 0.3
@@ -150,8 +150,17 @@ class VideoSummarizer:
             os.remove(temp_video_path)
         # return f"Error processing chunk {chunk_info['chunk_number']} after {max_retries} attempts: {str(e)}", None
                         
-    def create_video_summary_json(self, video_info, chunk_summaries):
+    def create_video_summary_json(self, video_info, chunk_summaries, window_size=180, overlap=60):
+        """
+        Create video summary JSON with sliding window text chunks to prevent truncation
+        when embedding with SentenceTransformer models.
         
+        Args:
+            video_info: Dictionary containing video metadata
+            chunk_summaries: List of tuples (chunk_info, summary)
+            window_size: Number of words in each text window
+            overlap: Number of words that overlap between windows
+        """
         video_summary = {
             'video_name': video_info['filename'],
             'video_path': video_info['path'],
@@ -165,22 +174,53 @@ class VideoSummarizer:
         }
         
         for chunk_info, summary in chunk_summaries:
-        # Ensure summary is a string
+            # Ensure summary is a string
             if isinstance(summary, list):
                 summary = summary[0] if summary else "Error: Empty summary"
             elif not isinstance(summary, str):
                 summary = str(summary)
                 
-            chunk_data = {
+            # Create the base chunk data with metadata
+            base_chunk_data = {
                 'chunk_number': chunk_info['chunk_number'],
                 'timestamp': chunk_info['timestamp'],
                 'start_time': chunk_info['start_time'],
                 'end_time': chunk_info['end_time'],
                 'duration': chunk_info['duration'],
-                'summary': summary,
+                'summary': summary,  # Keep original for reference
                 'summary_length': len(summary),
+                'text_windows': []   # New field to store sliding windows
             }
-            video_summary['chunks'].append(chunk_data)
+            
+            # Apply sliding window to the summary text
+            words = summary.split()
+            window_count = max(1, (len(words) - overlap) // (window_size - overlap) + 1)
+            
+            for i in range(window_count):
+                start_idx = i * (window_size - overlap)
+                end_idx = min(start_idx + window_size, len(words))
+                
+                # Skip tiny windows at the end
+                if end_idx - start_idx < 30 and i > 0:
+                    # Extend the previous window instead
+                    base_chunk_data['text_windows'][-1]['end_word_idx'] = len(words)
+                    base_chunk_data['text_windows'][-1]['text'] = ' '.join(words[
+                        base_chunk_data['text_windows'][-1]['start_word_idx']:len(words)
+                    ])
+                    break
+                
+                window_text = ' '.join(words[start_idx:end_idx])
+                
+                # Add window to the chunk
+                base_chunk_data['text_windows'].append({
+                    'window_number': i + 1,
+                    'start_word_idx': start_idx,
+                    'end_word_idx': end_idx,
+                    'text': window_text,
+                    'text_length': len(window_text)
+                })
+            
+            video_summary['chunks'].append(base_chunk_data)
         
         return video_summary
     
