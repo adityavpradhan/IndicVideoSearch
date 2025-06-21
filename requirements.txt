@@ -187,3 +187,4 @@ zstandard==0.23.0
 langchain-google-genai
 pydub
 streamlit-audiorecorder
+deep_translator==1.11.4
