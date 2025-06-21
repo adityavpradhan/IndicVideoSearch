@@ -10,7 +10,8 @@ def interactive_mode():
     print("Automatically handles videos in ANY language")
     
     summarizer = VideoSummarizer()
-    embedder = VideoEmbedder()
+    embedder = VideoEmbedder(model_name="all-MiniLM-L6-v2")
+    embedder.delete_collection(collection_name="video_summaries")
     
     while True:
         videos_dir = "videos"

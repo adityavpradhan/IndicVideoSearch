@@ -12,7 +12,8 @@ class ChatAppConfig:
         self.default_system_prompt = """You are a helpful AI assistant that specializes in video content analysis and search. 
 You help users find information from their video collections. Be concise but informative in your responses.
 When answering questions about videos, focus on the most relevant information. If the user input is not a question or unclear,
-just say "I couldn't understand you. Could you please repeat your question?"."""
+just say "I couldn't understand you. Could you please repeat your question?". If the answer is not found in the video summaries, 
+you can say "I don't have information on that topic yet. Please check back later or upload relevant videos for processing"."""
         
     def setup_directories(self):
         """Create necessary directories"""
