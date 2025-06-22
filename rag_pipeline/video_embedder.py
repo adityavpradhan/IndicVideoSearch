@@ -13,11 +13,12 @@ from sentence_transformers import CrossEncoder
 from langchain_huggingface import HuggingFaceEmbeddings
 
 class VideoEmbedder:
-    def __init__(self, persist_directory="chroma_db", model_name="all-MiniLM-L6-v2"):
+    def __init__(self, persist_directory="chroma_db", model_name="all-MiniLM-L6-v2", device="cpu"):
         """Initialize the embedder with ChromaDB handler and SentenceTransformer"""
+        self.device = device
         self.persist_directory = persist_directory
         self.model_name = model_name
-        self.embedder = SentenceTransformer(model_name)
+        self.embedder = SentenceTransformer(model_name, device=device)
         # self.embedder = HuggingFaceEmbeddings(model_name=model_name)
         
         # Initialize database handler (easily swappable)
