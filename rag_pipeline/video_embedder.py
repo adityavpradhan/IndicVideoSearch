@@ -26,7 +26,7 @@ class VideoEmbedder:
         self.reranking = False
 
         if self.reranking:
-            self.reranker = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
+            self.reranker = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2',device='cpu')
     
     def load_summary_json(self, json_path):
         """Load video summary from JSON file"""
